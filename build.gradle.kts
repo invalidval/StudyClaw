@@ -75,6 +75,10 @@ dependencies {
 
     implementation(libs.markdown.renderer.m3)
 
+    // DashScope SDK & RxJava3
+//    implementation("com.alibaba.dashscope:dashscope-sdk:2.10.2")
+    implementation("io.reactivex.rxjava3:rxjava:3.1.8")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -82,6 +86,8 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+
 }
 
 kapt {

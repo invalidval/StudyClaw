@@ -23,4 +23,7 @@ class QuestionRepository @Inject constructor(
 
     suspend fun chatWithAi(request: AliyunChatRequest): Response<AliyunChatResponse> =
         aiApiService.chat(request)
+
+    suspend fun chatWithAiStream(request: AliyunChatRequest): okhttp3.ResponseBody =
+        aiApiService.chatStream(request)
 }

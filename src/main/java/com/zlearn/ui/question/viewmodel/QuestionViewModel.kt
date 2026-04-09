@@ -10,16 +10,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import io.reactivex.rxjava3.disposables.CompositeDisposable
+import okhttp3.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 @HiltViewModel
 class QuestionViewModel @Inject constructor(
     private val useCases: QuestionUseCases
 ) : ViewModel() {
+    private val disposables = CompositeDisposable()
     private val _questions = MutableStateFlow<List<QuestionEntity>>(emptyList())
     val questions: StateFlow<List<QuestionEntity>> = _questions.asStateFlow()
 
     private val _aiResponse = MutableStateFlow<String?>(null)
     val aiResponse: StateFlow<String?> = _aiResponse.asStateFlow()
+
+    private val _aiStreamResponse = MutableStateFlow("")
+    val aiStreamResponse: StateFlow<String> = _aiStreamResponse.asStateFlow()
 
     init {
         loadQuestions()
@@ -85,5 +94,66 @@ class QuestionViewModel @Inject constructor(
         } else {
             ""
         }
+    }
+
+    fun updateAiAnalysis(id: Int, newAnalysis: String) {
+        viewModelScope.launch {
+            val question = useCases.getQuestionById(id)
+            if (question != null) {
+                useCases.updateQuestion(question.copy(aiAnalysis = newAnalysis))
+                loadQuestions()
+            }
+        }
+    }
+
+    fun clearAiStreamResponse() {
+        _aiStreamResponse.value = ""
+    }
+
+    // 真正流式：DashScope API (OkHttp SSE)
+    fun chatWithAiStream(message: String) {
+        _aiStreamResponse.value = ""
+        viewModelScope.launch {
+            val request = com.zlearn.network.AliyunChatRequest(
+                model = "qwen-plus",
+                input = com.zlearn.network.Input(
+                    messages = listOf(com.zlearn.network.Message(role = "user", content = message))
+                )
+            )
+            withContext(Dispatchers.IO) {
+                var responseBody: ResponseBody? = null
+                try {
+                    responseBody = useCases.chatWithAiStream(request)
+                    val source = responseBody.source()
+                    while (true) {
+                        val line = source.readUtf8Line() ?: break
+                        if (line.startsWith("data:")) {
+                            val json = line.removePrefix("data:").trim()
+                            if (json.isNotBlank() && json != "[DONE]") {
+                                val obj = JSONObject(json)
+                                val content = obj.optJSONObject("output")
+                                    ?.optString("text") ?: ""
+                                if (content.isNotBlank()) {
+                                    withContext(Dispatchers.Main) {
+                                        _aiStreamResponse.value = content
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        _aiStreamResponse.value += "\n[流式AI出错: ${e.message}]"
+                    }
+                } finally {
+                    responseBody?.close()
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        disposables.clear()
     }
 }
