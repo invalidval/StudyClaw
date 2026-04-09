@@ -5,6 +5,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 
@@ -15,6 +17,10 @@ fun QuestionCard(summary: String, onClick: () -> Unit, modifier: Modifier = Modi
             .padding(8.dp)
             .clickable { onClick() }
     ) {
-        Text(text = summary, modifier = Modifier.padding(16.dp))
+        Text(
+            text = summary,
+            modifier = Modifier.padding(16.dp),
+            maxLines = 1
+        )
     }
 }

@@ -68,4 +68,22 @@ class QuestionViewModel @Inject constructor(
             }
         }
     }
+
+    // 独立的summary生成方法，不影响主界面AI对话
+    suspend fun generateSummary(ocrText: String): String {
+        val request = com.zlearn.network.AliyunChatRequest(
+            model = "qwen-turbo",
+            input = com.zlearn.network.Input(
+                messages = listOf(
+                    com.zlearn.network.Message(role = "user", content = "请用20字以内总结这段内容：$ocrText")
+                )
+            )
+        )
+        val response = useCases.chatWithAi(request)
+        return if (response.isSuccessful) {
+            response.body()?.output?.text ?: ""
+        } else {
+            ""
+        }
+    }
 }

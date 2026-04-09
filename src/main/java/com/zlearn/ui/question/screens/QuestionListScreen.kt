@@ -30,6 +30,8 @@ fun QuestionListScreen(
 ) {
     val questions by viewModel.questions.collectAsState()
     val aiResponse by viewModel.aiResponse.collectAsState()
+    var summaryResponse by remember { mutableStateOf("") }
+    var summaryLoading by remember { mutableStateOf(false) }
     var aiInput by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
     var newOcrText by remember { mutableStateOf("") }
@@ -51,8 +53,15 @@ fun QuestionListScreen(
                 ocrLoading = false
                 if (ocrResult != null) {
                     newOcrText = ocrResult
-                    // OCR后自动AI解析
-                    viewModel.chatWithAi(ocrResult)
+                    // OCR后自动生成summary（独立调用AI）
+                    summaryLoading = true
+                    summaryResponse = ""
+                    coroutineScope.launch {
+                        val summary = viewModel.generateSummary(ocrResult)
+                        summaryResponse = summary
+                        newSummary = if (summary.length > 20) summary.take(20) else summary
+                        summaryLoading = false
+                    }
                     // 识别成功反馈
                     android.widget.Toast.makeText(context, "识别成功", android.widget.Toast.LENGTH_SHORT).show()
                 } else {
@@ -96,7 +105,8 @@ fun QuestionListScreen(
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(questions.size) { index ->
                     val q = questions[index]
-                    QuestionCard(summary = q.summary, onClick = {
+                    QuestionCard(summary = if (q.summary.isNotBlank()) q.summary else q.ocrText.take(20), onClick = {
+                        println("[DEBUG] Card clicked, id=${q.id}")
                         navController.navigate("question_detail/${q.id}")
                     })
                 }
@@ -132,12 +142,18 @@ fun QuestionListScreen(
                              label = { Text("图片路径(可选)") },
                              modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                          )
-                         OutlinedTextField(
-                             value = newSummary,
-                             onValueChange = { newSummary = it },
-                             label = { Text("AI摘要(可选)") },
-                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                         )
+                        // summary只读或隐藏，若需显示可用只读框
+                        OutlinedTextField(
+                            value = newSummary,
+                            onValueChange = {},
+                            label = { Text("AI摘要(自动生成)") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            enabled = false,
+                            readOnly = true
+                        )
+                        if (summaryLoading) {
+                            Text("正在生成摘要...", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(4.dp))
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("难度:")
                             Slider(
@@ -196,15 +212,10 @@ fun QuestionListScreen(
             )
         }
     }
-    // AI解析自动填充
+    // AI解析自动填充（仅用于AI解析，不影响summary）
     LaunchedEffect(aiResponse) {
         if (!aiResponse.isNullOrBlank()) {
             newAiAnalysis = aiResponse ?: ""
         }
     }
-}
-
-@Composable
-fun QuestionDetailScreen(id: Int, modifier: Modifier = Modifier) {
-    // 这里实际实现放到 QuestionDetailScreen.kt
 }
