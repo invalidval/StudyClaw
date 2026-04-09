@@ -1,20 +1,17 @@
-package com.zlearn
+package com.zlearn.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import com.zlearn.ui.theme.MyApplicationTheme
-import com.zlearn.ui.MainScreen
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
-                MainScreen()
-            }
+            // TODO: 调用NavGraph或主界面入口
         }
     }
 }
+
