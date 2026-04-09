@@ -1,27 +1,210 @@
 package com.zlearn.ui.question.screens
 
-import androidx.compose.foundation.layout.Column
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.provider.MediaStore
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.zlearn.ui.question.viewmodel.QuestionViewModel
+import com.zlearn.data.database.QuestionEntity
+import com.zlearn.ui.question.components.QuestionCard
+import androidx.compose.foundation.text.BasicTextField
+import kotlinx.coroutines.delay
+import androidx.navigation.NavController
+import androidx.compose.ui.platform.LocalContext
+import com.zlearn.ocr.OcrUtil
+import kotlinx.coroutines.launch
 
 @Composable
-fun QuestionListScreen(modifier: Modifier = Modifier) {
-    // TODO: Replace with real data and ViewModel
-    val questions = listOf("题目1", "题目2", "题目3")
-    LazyColumn(modifier = modifier) {
-        items(questions.size) { index ->
-            QuestionCard(title = questions[index])
+fun QuestionListScreen(
+    modifier: Modifier = Modifier,
+    viewModel: QuestionViewModel = hiltViewModel(),
+    navController: NavController
+) {
+    val questions by viewModel.questions.collectAsState()
+    val aiResponse by viewModel.aiResponse.collectAsState()
+    var aiInput by remember { mutableStateOf("") }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var newOcrText by remember { mutableStateOf("") }
+    var newSubject by remember { mutableStateOf("") }
+    var newDifficulty by remember { mutableStateOf(3) }
+    var newAiAnalysis by remember { mutableStateOf("") }
+    var newSummary by remember { mutableStateOf("") }
+    var newImagePath by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var ocrImageUri by remember { mutableStateOf<Uri?>(null) }
+    var ocrLoading by remember { mutableStateOf(false) }
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        ocrImageUri = uri
+        if (uri != null) {
+            ocrLoading = true
+            coroutineScope.launch {
+                val ocrResult = OcrUtil.recognizeTextFromUri(context, uri)
+                ocrLoading = false
+                if (ocrResult != null) {
+                    newOcrText = ocrResult
+                    // OCR后自动AI解析
+                    viewModel.chatWithAi(ocrResult)
+                    // 识别成功反馈
+                    android.widget.Toast.makeText(context, "识别成功", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    android.widget.Toast.makeText(context, "识别失败，请重试", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    Scaffold(
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAddDialog = true }) {
+                Text("+")
+            }
+        }
+    ) { innerPadding ->
+        Column(modifier = modifier.padding(innerPadding).fillMaxSize()) {
+            // AI对话区
+            OutlinedTextField(
+                value = aiInput,
+                onValueChange = { aiInput = it },
+                label = { Text("和大模型对话...") },
+                modifier = Modifier.fillMaxWidth().padding(8.dp)
+            )
+            Button(onClick = { viewModel.chatWithAi(aiInput) }, enabled = aiInput.isNotBlank()) {
+                Text("发送到AI")
+            }
+            // 渐进式AI回复
+            var animatedReply by remember { mutableStateOf("") }
+            val lastResponse = aiResponse ?: ""
+            LaunchedEffect(lastResponse) {
+                animatedReply = ""
+                for (i in lastResponse.indices) {
+                    animatedReply = lastResponse.substring(0, i + 1)
+                    delay(18) // 打字速度，可调整
+                }
+            }
+            if (!aiResponse.isNullOrBlank()) {
+                Text("AI回复：$animatedReply", modifier = Modifier.padding(8.dp), color = MaterialTheme.colorScheme.primary)
+            }
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(questions.size) { index ->
+                    val q = questions[index]
+                    QuestionCard(summary = q.summary, onClick = {
+                        navController.navigate("question_detail/${q.id}")
+                    })
+                }
+            }
+        }
+        if (showAddDialog) {
+            AlertDialog(
+                onDismissRequest = { showAddDialog = false },
+                title = { Text("添加题目") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = newOcrText,
+                            onValueChange = { newOcrText = it },
+                            label = { Text("题干/OCR文本") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        )
+                        OutlinedTextField(
+                            value = newSubject,
+                            onValueChange = { newSubject = it },
+                            label = { Text("学科") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        )
+                        OutlinedTextField(
+                            value = newAiAnalysis,
+                            onValueChange = { newAiAnalysis = it },
+                            label = { Text("AI解析(可选)") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        )
+                         OutlinedTextField(
+                             value = newImagePath,
+                             onValueChange = { newImagePath = it },
+                             label = { Text("图片路径(可选)") },
+                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                         )
+                         OutlinedTextField(
+                             value = newSummary,
+                             onValueChange = { newSummary = it },
+                             label = { Text("AI摘要(可选)") },
+                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                         )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("难度:")
+                            Slider(
+                                value = newDifficulty.toFloat(),
+                                onValueChange = { newDifficulty = it.toInt() },
+                                valueRange = 1f..5f,
+                                steps = 3,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(newDifficulty.toString())
+                        }
+                        // 新增：OCR图片选择与识别按钮
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Button(onClick = {
+                                        pickImageLauncher.launch("image/*")
+                                    }, enabled = !ocrLoading) {
+                                        Text("选择图片/拍照")
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    if (ocrLoading) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                                    } else if (ocrImageUri != null) {
+                                        Text("已选择图片")
+                                    }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (newOcrText.isNotBlank()) {
+                            viewModel.addQuestion(
+                                QuestionEntity(
+                                    imagePath = newImagePath,
+                                    ocrText = newOcrText,
+                                    aiAnalysis = newAiAnalysis,
+                                    summary = newSummary,
+                                    subject = newSubject,
+                                    difficulty = newDifficulty,
+                                    createTime = System.currentTimeMillis(),
+                                    isArchived = false
+                                )
+                            )
+                            showAddDialog = false
+                            newOcrText = ""
+                            newSubject = ""
+                            newAiAnalysis = ""
+                            newSummary = ""
+                            newImagePath = ""
+                            newDifficulty = 3
+                        }
+                    }) { Text("添加") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddDialog = false }) { Text("取消") }
+                }
+            )
+        }
+    }
+    // AI解析自动填充
+    LaunchedEffect(aiResponse) {
+        if (!aiResponse.isNullOrBlank()) {
+            newAiAnalysis = aiResponse ?: ""
         }
     }
 }
 
 @Composable
-fun QuestionDetailScreen(question: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
-        Text(text = "题目详情：$question")
-        // TODO: 展示题目图片、AI解析、备注等
-    }
+fun QuestionDetailScreen(id: Int, modifier: Modifier = Modifier) {
+    // 这里实际实现放到 QuestionDetailScreen.kt
 }
-

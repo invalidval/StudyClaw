@@ -1,6 +1,7 @@
 package com.zlearn.di
 
 import com.zlearn.data.remote.ApiService
+import com.zlearn.network.AiApiService
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
@@ -31,4 +32,24 @@ object NetworkModule {
     @Singleton
     fun provideApiService(retrofit: Retrofit): ApiService =
         retrofit.create(ApiService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideAiApiService(): AiApiService {
+        val aliyunApiKey = "sk-cec6e41f863145f895f0d9c563b08ffe" // TODO: 替换为你的阿里云API-KEY
+        val aliyunClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer $aliyunApiKey")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+        return Retrofit.Builder()
+            .baseUrl("https://dashscope.aliyuncs.com/")
+            .client(aliyunClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(AiApiService::class.java)
+    }
 }

@@ -65,10 +65,10 @@ fun BottomNavigationBar(navController: NavHostController, items: List<NavItem>) 
 @Composable
 fun NavGraphWithController(navController: NavHostController, modifier: Modifier = Modifier) {
     NavHost(navController = navController, startDestination = "question_list", modifier = modifier) {
-        composable("question_list") { com.zlearn.ui.question.screens.QuestionListScreen() }
-        composable("question_detail/{question}") { backStackEntry ->
-            val question = backStackEntry.arguments?.getString("question") ?: ""
-            com.zlearn.ui.question.screens.QuestionDetailScreen(question)
+        composable("question_list") { com.zlearn.ui.question.screens.QuestionListScreen(navController = navController) }
+        composable("question_detail/{id}") { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
+            com.zlearn.ui.question.screens.QuestionDetailScreen(id)
         }
         composable("review") { com.zlearn.ui.review.screens.ReviewScreen() }
         composable("nfc") { com.zlearn.ui.nfc.screens.NfcScreen() }

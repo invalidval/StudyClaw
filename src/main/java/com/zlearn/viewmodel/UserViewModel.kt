@@ -2,7 +2,6 @@ package com.zlearn.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.zlearn.data.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,20 +9,18 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class UserViewModel @Inject constructor(
-    private val userRepository: UserRepository
-) : ViewModel() {
+class UserViewModel @Inject constructor() : ViewModel() {
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
     fun register(username: String, password: String) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = userRepository.register(username, password)
-            _authState.value = if (result?.success == true) {
-                AuthState.Success(result.token)
+            // 本地假注册逻辑，允许任意注册
+            if (username.isNotBlank() && password.isNotBlank()) {
+                _authState.value = AuthState.Success(token = "mock-token-${'$'}username")
             } else {
-                AuthState.Error(result?.message ?: "注册失败")
+                _authState.value = AuthState.Error("用户名和密码不能为空")
             }
         }
     }
@@ -31,11 +28,11 @@ class UserViewModel @Inject constructor(
     fun login(username: String, password: String) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
-            val result = userRepository.login(username, password)
-            _authState.value = if (result?.success == true) {
-                AuthState.Success(result.token)
+            // 本地假登录逻辑，允许任意非空用户名密码
+            if (username.isNotBlank() && password.isNotBlank()) {
+                _authState.value = AuthState.Success(token = "mock-token-${'$'}username")
             } else {
-                AuthState.Error(result?.message ?: "登录失败")
+                _authState.value = AuthState.Error("用户名和密码不能为空")
             }
         }
     }

@@ -17,8 +17,12 @@ object AppModule {
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(context, AppDatabase::class.java, "app_db").build()
+        Room.databaseBuilder(context, AppDatabase::class.java, "app_db")
+            .fallbackToDestructiveMigration()
+            .build()
 
     @Provides
     fun provideQuestionDao(db: AppDatabase): QuestionDao = db.questionDao()
 }
+
+

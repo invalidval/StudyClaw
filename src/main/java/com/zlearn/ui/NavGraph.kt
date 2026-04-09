@@ -49,10 +49,10 @@ fun NavGraph() {
         composable("main") {
             MainScreen()
         }
-        composable("question_list") { QuestionListScreen() }
-        composable("question_detail/{question}") { backStackEntry: NavBackStackEntry ->
-            val question = backStackEntry.arguments?.getString("question") ?: ""
-            QuestionDetailScreen(question)
+        composable("question_list") { QuestionListScreen(navController = navController) }
+        composable("question_detail/{id}") { backStackEntry: NavBackStackEntry ->
+            val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
+            QuestionDetailScreen(id)
         }
         composable("review") { ReviewScreen() }
         composable("nfc") { NfcScreen() }

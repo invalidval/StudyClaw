@@ -10,8 +10,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            // TODO: 调用NavGraph或主界面入口
+            SplashScreen()
         }
     }
 }
-
