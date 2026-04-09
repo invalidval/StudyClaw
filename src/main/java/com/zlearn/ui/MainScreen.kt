@@ -17,6 +17,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.blur
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun MainScreen() {
@@ -42,22 +46,37 @@ data class NavItem(val label: String, val route: String, val icon: ImageVector)
 fun BottomNavigationBar(navController: NavHostController, items: List<NavItem>) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    NavigationBar {
-        items.forEach { item ->
-            NavigationBarItem(
-                icon = { Icon(item.icon, contentDescription = item.label) },
-                label = { Text(item.label) },
-                selected = currentRoute == item.route || (item.route == "question_list" && currentRoute == null),
-                onClick = {
-                    if (currentRoute != item.route) {
-                        navController.navigate(item.route) {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
+    Box {
+        // 原生毛玻璃模糊层（Android 14+）
+        NavigationBar(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(24.dp), // 移除 renderBehind 参数，保持兼容
+            containerColor = Color.Transparent,
+            tonalElevation = 0.dp
+        ) {}
+        // 前景内容层
+        NavigationBar(
+            modifier = Modifier,
+            containerColor = Color.Transparent,
+            tonalElevation = 0.dp
+        ) {
+            items.forEach { item ->
+                NavigationBarItem(
+                    icon = { Icon(item.icon, contentDescription = item.label) },
+                    label = { Text(item.label) },
+                    selected = currentRoute == item.route || (item.route == "question_list" && currentRoute == null),
+                    onClick = {
+                        if (currentRoute != item.route) {
+                            navController.navigate(item.route) {
+                                popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
                         }
                     }
-                }
-            )
+                )
+            }
         }
     }
 }

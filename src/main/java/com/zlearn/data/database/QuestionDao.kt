@@ -26,9 +26,18 @@ interface QuestionDao {
     @Query("UPDATE questions SET isArchived = 1 WHERE id = :id")
     suspend fun archive(id: Int)
 
+    @Query("UPDATE questions SET isArchived = 1, archiveType = :archiveType WHERE id = :id")
+    suspend fun archive(id: Int, archiveType: String)
+
     @Query("SELECT * FROM questions WHERE isArchived = 0 ORDER BY createTime DESC")
     suspend fun getActive(): List<QuestionEntity>
 
     @Query("SELECT * FROM questions WHERE isArchived = 1 ORDER BY createTime DESC")
     suspend fun getArchived(): List<QuestionEntity>
+
+    @Query("SELECT DISTINCT archiveType FROM questions WHERE archiveType IS NOT NULL")
+    suspend fun getAllArchiveTypes(): List<String>
+
+    @Query("SELECT * FROM questions WHERE archiveType = :type ORDER BY createTime DESC")
+    suspend fun getByArchiveType(type: String): List<QuestionEntity>
 }

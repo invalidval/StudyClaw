@@ -46,7 +46,7 @@ fun SplashScreen() {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "欢迎使用男娘交友平台",
+                        text = "喵喵喵~",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
@@ -56,7 +56,7 @@ fun SplashScreen() {
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "AI驱动的男娘交友与变男娘助手",
+                        text = "AI 助力，轻松学习",
                         fontSize = 18.sp,
                         color = Color.Gray,
                         textAlign = TextAlign.Center

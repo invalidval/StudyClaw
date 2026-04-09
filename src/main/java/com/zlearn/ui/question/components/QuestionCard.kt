@@ -9,14 +9,27 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import com.mikepenz.markdown.m3.Markdown
 
 @Composable
-fun QuestionCard(summary: String, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+fun QuestionCard(
+    summary: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null
+) {
     Card(
         modifier = modifier
             .padding(8.dp)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+            .then(
+                if (onClick != null || onLongPress != null)
+                    Modifier.combinedClickable(
+                        onClick = { onClick?.invoke() },
+                        onLongClick = { onLongPress?.invoke() }
+                    )
+                else Modifier
+            ),
         shape = MaterialTheme.shapes.medium,
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
     ) {

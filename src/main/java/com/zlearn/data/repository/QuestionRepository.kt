@@ -18,8 +18,11 @@ class QuestionRepository @Inject constructor(
     suspend fun update(question: QuestionEntity) = questionDao.update(question)
     suspend fun delete(question: QuestionEntity) = questionDao.delete(question)
     suspend fun archive(id: Int) = questionDao.archive(id)
+    suspend fun archive(id: Int, archiveType: String) = questionDao.archive(id, archiveType)
     suspend fun getActive(): List<QuestionEntity> = questionDao.getActive()
     suspend fun getArchived(): List<QuestionEntity> = questionDao.getArchived()
+    suspend fun getAllArchiveTypes(): List<String> = questionDao.getAllArchiveTypes()
+    suspend fun getByArchiveType(type: String): List<QuestionEntity> = questionDao.getByArchiveType(type)
 
     suspend fun chatWithAi(request: AliyunChatRequest): Response<AliyunChatResponse> =
         aiApiService.chat(request)

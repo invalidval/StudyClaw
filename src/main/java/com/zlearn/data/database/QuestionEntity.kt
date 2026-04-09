@@ -13,5 +13,6 @@ data class QuestionEntity(
     val subject: String,
     val difficulty: Int,
     val createTime: Long,
-    val isArchived: Boolean
+    val isArchived: Boolean,
+    val archiveType: String? = null // 归档类型，可为空
 )

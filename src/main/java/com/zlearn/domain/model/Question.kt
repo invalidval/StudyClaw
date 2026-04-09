@@ -9,5 +9,6 @@ data class Question(
     val subject: String,
     val difficulty: Int,
     val createTime: Long,
-    val isArchived: Boolean
+    val isArchived: Boolean,
+    val archiveType: String? = null
 )

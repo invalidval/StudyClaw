@@ -3,7 +3,6 @@ package com.zlearn.ui.question.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import android.provider.MediaStore
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
@@ -15,13 +14,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import com.zlearn.data.database.QuestionEntity
 import com.zlearn.ui.question.components.QuestionCard
-import androidx.compose.foundation.text.BasicTextField
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.navigation.NavController
 import androidx.compose.ui.platform.LocalContext
 import com.zlearn.ocr.OcrUtil
-import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuestionListScreen(
     modifier: Modifier = Modifier,
@@ -29,11 +27,7 @@ fun QuestionListScreen(
     navController: NavController
 ) {
     val questions by viewModel.questions.collectAsState()
-    val aiResponse by viewModel.aiResponse.collectAsState()
-    var summaryResponse by remember { mutableStateOf("") }
     var summaryLoading by remember { mutableStateOf(false) }
-    var aiInput by remember { mutableStateOf("") }
-    var showAddDialog by remember { mutableStateOf(false) }
     var newOcrText by remember { mutableStateOf("") }
     var newSubject by remember { mutableStateOf("") }
     var newDifficulty by remember { mutableStateOf(3) }
@@ -55,10 +49,9 @@ fun QuestionListScreen(
                     newOcrText = ocrResult
                     // OCR后自动生成summary（独立调用AI）
                     summaryLoading = true
-                    summaryResponse = ""
+                    newSummary = ""
                     coroutineScope.launch {
                         val summary = viewModel.generateSummary(ocrResult)
-                        summaryResponse = summary
                         newSummary = if (summary.length > 20) summary.take(20) else summary
                         summaryLoading = false
                     }
@@ -70,6 +63,15 @@ fun QuestionListScreen(
             }
         }
     }
+    var showActionSheet by remember { mutableStateOf(false) }
+    var selectedQuestion: QuestionEntity? by remember { mutableStateOf(null) }
+    var selectedArchiveType by remember { mutableStateOf<String?>(null) }
+    val archiveTypes by viewModel.archiveTypes.collectAsState()
+    val filteredQuestions by viewModel.filteredQuestions.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showArchiveTypeDialog by remember { mutableStateOf(false) }
+    var archiveTypeInput by remember { mutableStateOf("") }
+    var showFilterMenu by remember { mutableStateOf(false) }
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(onClick = { showAddDialog = true }) {
@@ -78,37 +80,83 @@ fun QuestionListScreen(
         }
     ) { innerPadding ->
         Column(modifier = modifier.padding(innerPadding).fillMaxSize()) {
-            // AI对话区
-            OutlinedTextField(
-                value = aiInput,
-                onValueChange = { aiInput = it },
-                label = { Text("和大模型对话...") },
-                modifier = Modifier.fillMaxWidth().padding(8.dp)
-            )
-            Button(onClick = { viewModel.chatWithAi(aiInput) }, enabled = aiInput.isNotBlank()) {
-                Text("发送到AI")
-            }
-            // 渐进式AI回复
-            var animatedReply by remember { mutableStateOf("") }
-            val lastResponse = aiResponse ?: ""
-            LaunchedEffect(lastResponse) {
-                animatedReply = ""
-                for (i in lastResponse.indices) {
-                    animatedReply = lastResponse.substring(0, i + 1)
-                    delay(18) // 打字速度，可调整
+            // --- 筛选归档类型 ---
+            Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showFilterMenu = true }) {
+                    Text("筛选归档:")
+                }
+                DropdownMenu(
+                    expanded = showFilterMenu,
+                    onDismissRequest = { showFilterMenu = false },
+                    modifier = Modifier.padding(start = 8.dp)
+                ) {
+                    DropdownMenuItem(onClick = {
+                        selectedArchiveType = null
+                        showFilterMenu = false
+                    }, text = { Text("全部") })
+                    archiveTypes.forEach { type ->
+                        DropdownMenuItem(onClick = {
+                            selectedArchiveType = type
+                            viewModel.filterQuestionsByArchiveType(type)
+                            showFilterMenu = false
+                        }, text = { Text(type) })
+                    }
+                }
+                if (selectedArchiveType != null) {
+                    Button(onClick = {
+                        selectedArchiveType = null
+                    }, modifier = Modifier.padding(start = 8.dp)) {
+                        Text("清除筛选")
+                    }
                 }
             }
-            if (!aiResponse.isNullOrBlank()) {
-                Text("AI回复：$animatedReply", modifier = Modifier.padding(8.dp), color = MaterialTheme.colorScheme.primary)
-            }
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(questions.size) { index ->
-                    val q = questions[index]
-                    QuestionCard(summary = if (q.summary.isNotBlank()) q.summary else q.ocrText.take(20), onClick = {
-                        println("[DEBUG] Card clicked, id=${q.id}")
-                        navController.navigate("question_detail/${q.id}")
-                    })
+            // --- 分组展示归档内容 ---
+            val displayQuestions = if (selectedArchiveType != null) filteredQuestions else questions
+            if (selectedArchiveType != null) {
+                // 只展示筛选结果，不分组
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(displayQuestions.size) { index ->
+                        val q = displayQuestions[index]
+                        QuestionCard(
+                            summary = if (q.summary.isNotBlank()) q.summary else q.ocrText.take(20),
+                            onClick = {
+                                println("[DEBUG] Card clicked, id=${q.id}")
+                                navController.navigate("question_detail/${q.id}")
+                            },
+                            onLongPress = {
+                                selectedQuestion = q
+                                showActionSheet = true
+                            }
+                        )
+                    }
+                }
+            } else {
+                // 分组展示所有归档内容
+                val allQuestions = questions
+                val grouped = allQuestions.groupBy { it.archiveType ?: "" }
+                val archiveTypeList = listOf("") + archiveTypes.filter { it.isNotBlank() && it != "" }
+                archiveTypeList.forEach { type ->
+                    val groupTitle = if (type.isBlank()) "未归档" else type
+                    val groupQuestions = grouped[type] ?: emptyList()
+                    if (groupQuestions.isNotEmpty()) {
+                        Text(groupTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp, start = 12.dp, bottom = 4.dp))
+                        LazyColumn(modifier = Modifier.fillMaxWidth(), userScrollEnabled = false) {
+                            items(groupQuestions.size) { index ->
+                                val q = groupQuestions[index]
+                                QuestionCard(
+                                    summary = if (q.summary.isNotBlank()) q.summary else q.ocrText.take(20),
+                                    onClick = {
+                                        println("[DEBUG] Card clicked, id=${q.id}")
+                                        navController.navigate("question_detail/${q.id}")
+                                    },
+                                    onLongPress = {
+                                        selectedQuestion = q
+                                        showActionSheet = true
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -211,11 +259,57 @@ fun QuestionListScreen(
                 }
             )
         }
-    }
-    // AI解析自动填充（仅用于AI解析，不影响summary）
-    LaunchedEffect(aiResponse) {
-        if (!aiResponse.isNullOrBlank()) {
-            newAiAnalysis = aiResponse ?: ""
+        if (showActionSheet && selectedQuestion != null) {
+            ModalBottomSheet(onDismissRequest = { showActionSheet = false }) {
+                Column(Modifier.padding(16.dp)) {
+                    TextButton(onClick = {
+                        viewModel.deleteQuestion(selectedQuestion!!)
+                        showActionSheet = false
+                    }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = {
+                        showArchiveTypeDialog = true
+                        showActionSheet = false
+                        archiveTypeInput = ""
+                    }) { Text("归档") }
+                    TextButton(onClick = { showActionSheet = false }) { Text("取消") }
+                }
+            }
+        }
+        if (showArchiveTypeDialog && selectedQuestion != null) {
+            AlertDialog(
+                onDismissRequest = { showArchiveTypeDialog = false },
+                title = { Text("选择或输入归档类型") },
+                text = {
+                    Column {
+                        archiveTypes.forEach { type ->
+                            Button(onClick = {
+                                viewModel.archiveQuestion(selectedQuestion!!.id, type)
+                                showArchiveTypeDialog = false
+                            }, modifier = Modifier.padding(vertical = 2.dp)) {
+                                Text(type)
+                            }
+                        }
+                        OutlinedTextField(
+                            value = archiveTypeInput,
+                            onValueChange = { archiveTypeInput = it },
+                            label = { Text("新建归档类型") },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (archiveTypeInput.isNotBlank()) {
+                            viewModel.archiveQuestion(selectedQuestion!!.id, archiveTypeInput)
+                            showArchiveTypeDialog = false
+                        }
+                    }) { Text("确定归档") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showArchiveTypeDialog = false }) { Text("取消") }
+                }
+            )
         }
     }
+
 }
