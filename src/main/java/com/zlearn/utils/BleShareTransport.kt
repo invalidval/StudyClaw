@@ -8,11 +8,22 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
+import android.os.SystemClock
 import android.util.Log
 import java.util.*
 
 object BleShareTransport {
     private const val TAG = "BleShareTransport"
+
+    sealed interface AdvertiseStartResult {
+        data object Started : AdvertiseStartResult
+        data object NotInitialized : AdvertiseStartResult
+        data object BluetoothDisabled : AdvertiseStartResult
+        data object MissingPermission : AdvertiseStartResult
+        data object AdvertiserUnavailable : AdvertiseStartResult
+        data object GattServerOpenFailed : AdvertiseStartResult
+        data class Failed(val errorCode: Int) : AdvertiseStartResult
+    }
 
     sealed interface ScanStartResult {
         data object Started : ScanStartResult
@@ -59,15 +70,30 @@ object BleShareTransport {
 
     // 发送端：开始广播并提供数据
     @SuppressLint("MissingPermission")
-    fun startAdvertising(ctx: Context, data: String) {
+    fun startAdvertising(
+        ctx: Context,
+        data: String,
+        onResult: (AdvertiseStartResult) -> Unit
+    ) {
+        if (bluetoothAdapter == null || bluetoothManager == null) {
+            onResult(AdvertiseStartResult.NotInitialized)
+            return
+        }
+        if (!isBluetoothEnabled()) {
+            onResult(AdvertiseStartResult.BluetoothDisabled)
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!hasPermission(Manifest.permission.BLUETOOTH_ADVERTISE) ||
                 !hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
-                // Permissions not granted, cannot advertise
                 Log.w(TAG, "startAdvertising skipped: missing permission")
+                onResult(AdvertiseStartResult.MissingPermission)
                 return
             }
         }
+
+        stopAdvertising()
+
         // 创建服务
         val service = BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         val characteristic = BluetoothGattCharacteristic(
@@ -86,14 +112,35 @@ object BleShareTransport {
                 offset: Int,
                 characteristic: BluetoothGattCharacteristic
             ) {
+                Log.d(TAG, "onCharacteristicReadRequest from ${device.address}, offset=$offset")
                 @Suppress("DEPRECATION")
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, characteristic.value)
+                val fullValue = characteristic.value ?: ByteArray(0)
+                if (offset > fullValue.size) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null)
+                    return
+                }
+                val slice = fullValue.copyOfRange(offset, fullValue.size)
+                Log.d(TAG, "sendResponse chunk=${slice.size}, total=${fullValue.size}, offset=$offset")
+                @Suppress("DEPRECATION")
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, slice)
             }
         })
+        if (gattServer == null) {
+            Log.e(TAG, "openGattServer returned null")
+            onResult(AdvertiseStartResult.GattServerOpenFailed)
+            return
+        }
         gattServer?.addService(service)
 
         // 开始广播
         advertiser = bluetoothAdapter?.bluetoothLeAdvertiser
+        if (advertiser == null) {
+            Log.e(TAG, "BluetoothLeAdvertiser unavailable")
+            gattServer?.close()
+            gattServer = null
+            onResult(AdvertiseStartResult.AdvertiserUnavailable)
+            return
+        }
         val advertiseSettings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
@@ -107,10 +154,14 @@ object BleShareTransport {
         advertiseCallback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
                 Log.d(TAG, "BLE advertising started")
+                onResult(AdvertiseStartResult.Started)
             }
 
             override fun onStartFailure(errorCode: Int) {
                 Log.e(TAG, "BLE advertising failed, code=$errorCode")
+                gattServer?.close()
+                gattServer = null
+                onResult(AdvertiseStartResult.Failed(errorCode))
             }
         }
         advertiser?.startAdvertising(advertiseSettings, advertiseData, advertiseCallback)
@@ -143,32 +194,80 @@ object BleShareTransport {
         val localScanner = adapter.bluetoothLeScanner ?: return ScanStartResult.ScannerUnavailable
         onDataReceived = onReceived
         scanner = localScanner
+        val scanStartAt = SystemClock.elapsedRealtime()
+        var isConnecting = false
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
-        val scanFilter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(SERVICE_UUID))
-            .build()
         scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                if (!isScanning || isConnecting) return
+
+                val serviceUuids = result.scanRecord?.serviceUuids?.map { it.uuid }.orEmpty()
+                val hasTargetService = serviceUuids.contains(SERVICE_UUID)
+                val fallbackConnectAllowed = (SystemClock.elapsedRealtime() - scanStartAt) >= 4_000L
+                if (!hasTargetService && !fallbackConnectAllowed) return
+
                 Log.d(TAG, "scan result from ${result.device?.address}")
                 val device = result.device
-                currentGatt = device.connectGatt(ctx, false, object : BluetoothGattCallback() {
+                isConnecting = true
+                var serviceDiscoveryStarted = false
+                val callback = object : BluetoothGattCallback() {
+                    private fun startServiceDiscovery(gatt: BluetoothGatt) {
+                        if (serviceDiscoveryStarted) return
+                        serviceDiscoveryStarted = true
+                        gatt.discoverServices()
+                    }
+
                     override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            Log.w(TAG, "connect failed, status=$status")
+                            isConnecting = false
+                            gatt.close()
+                            return
+                        }
                         if (newState == BluetoothProfile.STATE_CONNECTED) {
-                            gatt.requestMtu(512) // 请求更大MTU
-                            gatt.discoverServices()
+                            runCatching { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) }
+                            val mtuRequested = runCatching { gatt.requestMtu(517) }.getOrDefault(false)
+                            Log.d(TAG, "connected, mtuRequested=$mtuRequested")
+                            if (!mtuRequested) {
+                                startServiceDiscovery(gatt)
+                            }
+                        } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                            isConnecting = false
+                            gatt.close()
                         }
                     }
 
                     override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
-                        // MTU changed
+                        Log.d(TAG, "mtu changed, mtu=$mtu status=$status")
+                        startServiceDiscovery(gatt)
                     }
 
                     override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                        Log.d(TAG, "onServicesDiscovered, status=$status")
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            Log.w(TAG, "discoverServices failed, status=$status")
+                            isConnecting = false
+                            gatt.close()
+                            return
+                        }
                         val service = gatt.getService(SERVICE_UUID)
                         val characteristic = service?.getCharacteristic(CHARACTERISTIC_UUID)
-                        gatt.readCharacteristic(characteristic)
+                        if (characteristic == null) {
+                            val discovered = gatt.services?.joinToString { it.uuid.toString() }.orEmpty()
+                            Log.w(TAG, "target characteristic not found, services=[$discovered]")
+                            isConnecting = false
+                            gatt.close()
+                            return
+                        }
+                        @Suppress("DEPRECATION")
+                        val readStarted = gatt.readCharacteristic(characteristic)
+                        Log.d(TAG, "readCharacteristic requested=$readStarted")
+                        if (!readStarted) {
+                            isConnecting = false
+                            gatt.close()
+                        }
                     }
 
                     override fun onCharacteristicRead(
@@ -177,29 +276,53 @@ object BleShareTransport {
                         value: ByteArray,
                         status: Int
                     ) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            Log.w(TAG, "characteristic read failed, status=$status")
+                            isConnecting = false
+                            gatt.close()
+                            return
+                        }
+                        Log.d(TAG, "characteristic read success, bytes=${value.size}")
                         val data = String(value, Charsets.UTF_8)
                         onDataReceived?.invoke(data)
+                        isConnecting = false
                         gatt.close()
                         stopScanning()
                     }
 
                     @Deprecated("Deprecated in Java")
                     override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            Log.w(TAG, "characteristic read failed(deprecated), status=$status")
+                            isConnecting = false
+                            gatt.close()
+                            return
+                        }
                         @Suppress("DEPRECATION")
-                        val data = String(characteristic.value, Charsets.UTF_8)
+                        val value = characteristic.value
+                        Log.d(TAG, "characteristic read success(deprecated), bytes=${value.size}")
+                        val data = String(value, Charsets.UTF_8)
                         onDataReceived?.invoke(data)
+                        isConnecting = false
                         gatt.close()
                         stopScanning()
                     }
-                })
+                }
+                currentGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    device.connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE)
+                } else {
+                    device.connectGatt(ctx, false, callback)
+                }
             }
 
             override fun onScanFailed(errorCode: Int) {
                 Log.e(TAG, "scan failed, code=$errorCode")
                 isScanning = false
+                isConnecting = false
             }
         }
-        scanner?.startScan(listOf(scanFilter), scanSettings, scanCallback)
+        // Some devices drop filtered results unexpectedly, so we scan broadly and validate in callback.
+        scanner?.startScan(emptyList(), scanSettings, scanCallback)
         isScanning = true
         return ScanStartResult.Started
     }

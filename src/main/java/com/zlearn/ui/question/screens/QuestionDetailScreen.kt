@@ -15,6 +15,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Handler
+import android.os.Looper
 import com.zlearn.data.database.QuestionEntity
 import com.zlearn.domain.model.ShareItem
 import com.zlearn.domain.model.SharePayload
@@ -23,6 +27,7 @@ import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import com.zlearn.utils.BleShareTransport
 import com.zlearn.utils.NfcShareCodec
 import com.zlearn.utils.NfcUtil
+import com.zlearn.utils.PermissionUtil
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
@@ -44,6 +49,30 @@ fun QuestionDetailScreen(
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
     val context = LocalContext.current
+    val uiHandler = remember { Handler(Looper.getMainLooper()) }
+    val requiredBlePermissions = remember { PermissionUtil.requiredBlePermissions() }
+    var pendingShareStart by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val granted = result.values.all { it }
+        if (!granted) {
+            android.widget.Toast.makeText(context, "缺少 BLE 权限，无法开始分享", android.widget.Toast.LENGTH_SHORT).show()
+            pendingShareStart = false
+            return@rememberLauncherForActivityResult
+        }
+        if (pendingShareStart) {
+            pendingShareStart = false
+            question?.let {
+                startShare(
+                    question = it,
+                    context = context,
+                    navController = navController,
+                    uiHandler = uiHandler
+                )
+            }
+        }
+    }
 
     if (question == null) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -60,33 +89,17 @@ fun QuestionDetailScreen(
 
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
                 Button(onClick = {
-                    val sessionId = UUID.randomUUID().toString()
-                    NfcUtil.setOutgoingPayload(sessionId)
-                    val hashInput = "${question.ocrText}|${question.summary}|${question.subject}"
-                    val hash = MessageDigest.getInstance("SHA-256")
-                        .digest(hashInput.toByteArray())
-                        .joinToString("") { "%02x".format(it) }
-                    val payload = SharePayload(
-                        sessionId = sessionId,
-                        senderDevice = android.os.Build.MODEL ?: "android",
-                        createdAt = System.currentTimeMillis(),
-                        items = listOf(
-                            ShareItem(
-                                contentHash = hash,
-                                ocrText = question.ocrText,
-                                summary = question.summary,
-                                subject = question.subject,
-                                difficulty = question.difficulty,
-                                aiAnalysis = question.aiAnalysis,
-                                isArchived = question.isArchived,
-                                archiveType = question.archiveType ?: ""
-                            )
+                    if (!PermissionUtil.hasBlePermissions(context)) {
+                        pendingShareStart = true
+                        permissionLauncher.launch(requiredBlePermissions)
+                    } else {
+                        startShare(
+                            question = question,
+                            context = context,
+                            navController = navController,
+                            uiHandler = uiHandler
                         )
-                    )
-                    val encoded = NfcShareCodec.encode(payload)
-                    BleShareTransport.startAdvertising(context, encoded)
-                    android.widget.Toast.makeText(context, "已准备分享，请让接收方打开NFC页后轻触", android.widget.Toast.LENGTH_SHORT).show()
-                    navController?.navigate("nfc/sender")
+                    }
                 }) {
                     Text("NFC分享")
                 }
@@ -144,6 +157,73 @@ fun QuestionDetailScreen(
                 placeholder = "试试智能小助手",
                 buttonText = "发送"
             )
+        }
+    }
+}
+
+private fun startShare(
+    question: QuestionEntity,
+    context: android.content.Context,
+    navController: NavController?,
+    uiHandler: Handler
+) {
+    val sessionId = UUID.randomUUID().toString()
+    val hashInput = "${question.ocrText}|${question.summary}|${question.subject}"
+    val hash = MessageDigest.getInstance("SHA-256")
+        .digest(hashInput.toByteArray())
+        .joinToString("") { "%02x".format(it) }
+    val payload = SharePayload(
+        sessionId = sessionId,
+        senderDevice = android.os.Build.MODEL ?: "android",
+        createdAt = System.currentTimeMillis(),
+        items = listOf(
+            ShareItem(
+                contentHash = hash,
+                ocrText = question.ocrText,
+                summary = question.summary,
+                subject = question.subject,
+                difficulty = question.difficulty,
+                aiAnalysis = question.aiAnalysis,
+                isArchived = question.isArchived,
+                archiveType = question.archiveType ?: ""
+            )
+        )
+    )
+    val encoded = NfcShareCodec.encode(payload)
+
+    BleShareTransport.startAdvertising(context, encoded) { result ->
+        uiHandler.post {
+            when (result) {
+                BleShareTransport.AdvertiseStartResult.Started -> {
+                    NfcUtil.setOutgoingPayload(sessionId)
+                    android.widget.Toast.makeText(context, "已准备分享，请让接收方打开NFC页后轻触", android.widget.Toast.LENGTH_SHORT).show()
+                    navController?.navigate("nfc/sender")
+                }
+
+                BleShareTransport.AdvertiseStartResult.NotInitialized -> {
+                    android.widget.Toast.makeText(context, "BLE 未初始化，请重试", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                BleShareTransport.AdvertiseStartResult.BluetoothDisabled -> {
+                    android.widget.Toast.makeText(context, "蓝牙未开启，请先打开蓝牙", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                BleShareTransport.AdvertiseStartResult.MissingPermission -> {
+                    android.widget.Toast.makeText(context, "缺少 BLE 权限，请先授权", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                BleShareTransport.AdvertiseStartResult.AdvertiserUnavailable -> {
+                    android.widget.Toast.makeText(context, "当前设备不支持 BLE 广播", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                BleShareTransport.AdvertiseStartResult.GattServerOpenFailed -> {
+                    android.widget.Toast.makeText(context, "GATT 服务启动失败，请重试", android.widget.Toast.LENGTH_SHORT).show()
+                }
+
+                is BleShareTransport.AdvertiseStartResult.Failed -> {
+                    android.widget.Toast.makeText(context, "BLE 广播失败，错误码: ${result.errorCode}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 }

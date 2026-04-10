@@ -39,7 +39,7 @@ class NfcViewModel @Inject constructor(
     private var lastEventAtMs: Long = 0
     private val debounceWindowMs = 800L
     private var importTimeoutJob: Job? = null
-    private val importTimeoutMs = 20_000L
+    private val importTimeoutMs = 45_000L
 
     init {
         viewModelScope.launch {
