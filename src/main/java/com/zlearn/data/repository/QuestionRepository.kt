@@ -20,7 +20,10 @@ class QuestionRepository @Inject constructor(
     suspend fun getAll(): List<QuestionEntity> = questionDao.getAll()
     suspend fun getById(id: Int): QuestionEntity? = questionDao.getById(id)
     suspend fun update(question: QuestionEntity) = questionDao.update(question)
-    suspend fun delete(question: QuestionEntity) = questionDao.delete(question)
+    suspend fun delete(question: QuestionEntity) {
+        val now = System.currentTimeMillis()
+        questionDao.softDeleteById(question.id, deletedAt = now, updatedAt = now)
+    }
     suspend fun archive(id: Int) = questionDao.archive(id, System.currentTimeMillis())
     suspend fun archive(id: Int, archiveType: String) =
         questionDao.archive(id, archiveType, System.currentTimeMillis())
@@ -38,7 +41,7 @@ class QuestionRepository @Inject constructor(
         aiApiService.chatStream(request)
 
     suspend fun syncQuestions(token: String): String {
-        val localQuestions = questionDao.getAll()
+        val localQuestions = questionDao.getAllForSync()
         val payload = localQuestions.map { it.toSyncDto() }
         val response = apiService.syncQuestions(
             authorization = "Bearer $token",
@@ -81,6 +84,7 @@ class QuestionRepository @Inject constructor(
         createTime = createTime,
         isArchived = isArchived,
         archiveType = archiveType,
+        deletedAt = deletedAt,
         updatedAt = updatedAt
     )
 
@@ -96,6 +100,7 @@ class QuestionRepository @Inject constructor(
         createTime = createTime,
         isArchived = isArchived,
         archiveType = archiveType,
+        deletedAt = deletedAt,
         updatedAt = updatedAt
     )
 }

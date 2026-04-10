@@ -16,5 +16,6 @@ data class QuestionEntity(
     val createTime: Long,
     val isArchived: Boolean,
     val archiveType: String? = null, // 归档类型，可为空
+    val deletedAt: Long? = null,
     val updatedAt: Long = System.currentTimeMillis()
 )

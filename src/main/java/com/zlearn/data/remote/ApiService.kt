@@ -21,6 +21,7 @@ data class SyncQuestionDto(
     val createTime: Long,
     val isArchived: Boolean,
     val archiveType: String? = null,
+    val deletedAt: Long? = null,
     val updatedAt: Long
 )
 

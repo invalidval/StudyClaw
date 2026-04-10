@@ -1,7 +1,6 @@
 package com.zlearn.data.database
 
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -15,10 +14,13 @@ interface QuestionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrReplace(question: QuestionEntity)
 
-    @Query("SELECT * FROM questions ORDER BY createTime DESC")
+    @Query("SELECT * FROM questions WHERE deletedAt IS NULL ORDER BY createTime DESC")
     suspend fun getAll(): List<QuestionEntity>
 
-    @Query("SELECT * FROM questions WHERE id = :id")
+    @Query("SELECT * FROM questions ORDER BY createTime DESC")
+    suspend fun getAllForSync(): List<QuestionEntity>
+
+    @Query("SELECT * FROM questions WHERE id = :id AND deletedAt IS NULL")
     suspend fun getById(id: Int): QuestionEntity?
 
     @Query("SELECT * FROM questions WHERE cloudId = :cloudId LIMIT 1")
@@ -30,27 +32,27 @@ interface QuestionDao {
     @Update
     suspend fun update(question: QuestionEntity)
 
-    @Delete
-    suspend fun delete(question: QuestionEntity)
+    @Query("UPDATE questions SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun softDeleteById(id: Int, deletedAt: Long, updatedAt: Long)
 
-    @Query("UPDATE questions SET isArchived = 1, updatedAt = :updatedAt WHERE id = :id")
+    @Query("UPDATE questions SET isArchived = 1, updatedAt = :updatedAt WHERE id = :id AND deletedAt IS NULL")
     suspend fun archive(id: Int, updatedAt: Long)
 
-    @Query("UPDATE questions SET isArchived = 1, archiveType = :archiveType, updatedAt = :updatedAt WHERE id = :id")
+    @Query("UPDATE questions SET isArchived = 1, archiveType = :archiveType, updatedAt = :updatedAt WHERE id = :id AND deletedAt IS NULL")
     suspend fun archive(id: Int, archiveType: String, updatedAt: Long)
 
-    @Query("UPDATE questions SET isArchived = 0, archiveType = NULL, updatedAt = :updatedAt WHERE id = :id")
+    @Query("UPDATE questions SET isArchived = 0, archiveType = NULL, updatedAt = :updatedAt WHERE id = :id AND deletedAt IS NULL")
     suspend fun unarchive(id: Int, updatedAt: Long)
 
-    @Query("SELECT * FROM questions WHERE isArchived = 0 ORDER BY createTime DESC")
+    @Query("SELECT * FROM questions WHERE isArchived = 0 AND deletedAt IS NULL ORDER BY createTime DESC")
     suspend fun getActive(): List<QuestionEntity>
 
-    @Query("SELECT * FROM questions WHERE isArchived = 1 ORDER BY createTime DESC")
+    @Query("SELECT * FROM questions WHERE isArchived = 1 AND deletedAt IS NULL ORDER BY createTime DESC")
     suspend fun getArchived(): List<QuestionEntity>
 
-    @Query("SELECT DISTINCT archiveType FROM questions WHERE archiveType IS NOT NULL")
+    @Query("SELECT DISTINCT archiveType FROM questions WHERE archiveType IS NOT NULL AND deletedAt IS NULL")
     suspend fun getAllArchiveTypes(): List<String>
 
-    @Query("SELECT * FROM questions WHERE archiveType = :type ORDER BY createTime DESC")
+    @Query("SELECT * FROM questions WHERE archiveType = :type AND deletedAt IS NULL ORDER BY createTime DESC")
     suspend fun getByArchiveType(type: String): List<QuestionEntity>
 }
