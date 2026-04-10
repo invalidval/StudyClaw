@@ -29,5 +29,8 @@ class QuestionUseCases @Inject constructor(
     suspend fun chatWithAiStream(request: AliyunChatRequest): okhttp3.ResponseBody =
         repository.chatWithAiStream(request)
 
+    suspend fun getQuestionFromCloud(cloudId: Int): QuestionEntity? =
+        repository.getQuestionFromCloud(cloudId)
+
     suspend fun syncQuestions(token: String): String = repository.syncQuestions(token)
 }

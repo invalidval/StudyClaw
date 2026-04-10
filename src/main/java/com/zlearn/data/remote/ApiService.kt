@@ -3,6 +3,8 @@ package com.zlearn.data.remote
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.Response
 
 // 注册/登录请求体
@@ -35,6 +37,12 @@ data class SyncQuestionsResponse(
     val message: String? = null
 )
 
+data class QuestionDetailResponse(
+    val success: Boolean,
+    val question: SyncQuestionDto? = null,
+    val message: String? = null
+)
+
 interface ApiService {
     @POST("/api/register")
     suspend fun register(@Body request: AuthRequest): Response<AuthResponse>
@@ -47,5 +55,9 @@ interface ApiService {
         @Header("Authorization") authorization: String,
         @Body request: SyncQuestionsRequest
     ): Response<SyncQuestionsResponse>
-}
 
+    @GET("/api/questions/{id}")
+    suspend fun getQuestion(
+        @Path("id") id: Int
+    ): Response<QuestionDetailResponse>
+}

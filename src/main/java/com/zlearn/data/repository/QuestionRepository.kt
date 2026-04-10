@@ -40,6 +40,17 @@ class QuestionRepository @Inject constructor(
     suspend fun chatWithAiStream(request: AliyunChatRequest): okhttp3.ResponseBody =
         aiApiService.chatStream(request)
 
+    suspend fun getQuestionFromCloud(cloudId: Int): QuestionEntity? {
+        val response = apiService.getQuestion(cloudId)
+        if (response.isSuccessful) {
+            val body = response.body()
+            if (body?.success == true && body.question != null) {
+                return body.question.toEntity(localId = 0)
+            }
+        }
+        return null
+    }
+
     suspend fun syncQuestions(token: String): String {
         val localQuestions = questionDao.getAllForSync()
         val payload = localQuestions.map { it.toSyncDto() }

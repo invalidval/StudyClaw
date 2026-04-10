@@ -14,11 +14,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.zlearn.v3"
+        applicationId = "com.zlearn.v4"
         minSdk = 24
         targetSdk = 36
         versionCode = 2
-        versionName = "1.2"
+        versionName = "1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

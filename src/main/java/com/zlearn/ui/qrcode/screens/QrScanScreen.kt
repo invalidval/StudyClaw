@@ -8,8 +8,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.utils.QrCodeUtil
-import com.zlearn.utils.NfcShareCodec
-import com.zlearn.domain.model.SharePayload
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -31,16 +29,19 @@ import com.journeyapps.barcodescanner.CompoundBarcodeView
 import com.journeyapps.barcodescanner.DefaultDecoderFactory
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.DecodeHintType
-import android.util.Log
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QrScanScreen(viewModel: QuestionViewModel = hiltViewModel()) {
     val context = LocalContext.current
     var scanResult by remember { mutableStateOf<String?>(null) }
-    var previewPayload by remember { mutableStateOf<SharePayload?>(null) }
+    val previewPayload by viewModel.remoteQuestion.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -68,10 +69,8 @@ fun QrScanScreen(viewModel: QuestionViewModel = hiltViewModel()) {
             val bitmap = inputStream?.use { stream -> BitmapFactory.decodeStream(stream) }
             if (bitmap != null) {
                 val text = QrCodeUtil.decodeFromBitmap(bitmap)
-                scanResult = text
                 if (!text.isNullOrBlank()) {
-                    val payload = NfcShareCodec.decode(text).getOrNull()
-                    previewPayload = payload
+                    handleScannedText(text, viewModel)
                 }
             }
         }
@@ -116,11 +115,8 @@ fun QrScanScreen(viewModel: QuestionViewModel = hiltViewModel()) {
                                     )
                                     decodeContinuous { result ->
                                         if (scanResult != result.text) {
-                                            val payload = NfcShareCodec.decode(result.text).getOrNull()
-                                            if (payload != null && payload.items.isNotEmpty()) {
-                                                scanResult = result.text
-                                                previewPayload = payload
-                                            }
+                                            scanResult = result.text
+                                            handleScannedText(result.text, viewModel)
                                         }
                                     }
                                     resume()
@@ -163,40 +159,93 @@ fun QrScanScreen(viewModel: QuestionViewModel = hiltViewModel()) {
     }
 
     // 识别结果弹窗
-    if (previewPayload != null) {
-        val item = previewPayload!!.items.firstOrNull()
-        if (item != null) {
-            Dialog(onDismissRequest = {
-                previewPayload = null
-                scanResult = null
-            }) {
-                Card(
+    if (previewPayload != null || isLoading || error != null) {
+        Dialog(onDismissRequest = {
+            viewModel.clearRemoteQuestion()
+            viewModel.clearError()
+            scanResult = null
+        }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .fillMaxHeight(0.8f),
+                shape = MaterialTheme.shapes.extraLarge
+            ) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth(0.95f)
-                        .fillMaxHeight(0.8f),
-                    shape = MaterialTheme.shapes.extraLarge
+                        .padding(24.dp)
+                        .fillMaxSize()
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .padding(24.dp)
-                            .fillMaxSize()
-                    ) {
+                    if (isLoading) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    } else if (error != null) {
+                        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Text("加载失败", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.height(8.dp))
+                            Text(error!!, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(24.dp))
+                            Button(onClick = { viewModel.clearError(); scanResult = null }) {
+                                Text("重试")
+                            }
+                        }
+                    } else if (previewPayload != null) {
+                        val item = previewPayload!!
                         Text("识别到题目", style = MaterialTheme.typography.titleLarge)
                         Spacer(modifier = Modifier.height(16.dp))
 
                         // 题目内容支持滚动
                         Box(modifier = Modifier.weight(1f)) {
                             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                Text("摘要：", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                Text(item.summary)
+                                Spacer(modifier = Modifier.height(12.dp))
+
                                 Text("题干：", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                                 Text(item.ocrText)
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text("学科：${item.subject}")
-                                Text("难度：${item.difficulty}")
+
+                                Row(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("学科：", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                        Text(item.subject)
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("难度：", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                        Text(
+                                            text = when (item.difficulty) {
+                                                1, 2-> "简单"
+                                                3 -> "中等"
+                                                4 -> "有点难"
+                                                5 -> "困难"
+                                                else -> "白送？地狱级？"
+                                            }
+                                        )
+                                    }
+                                }
+
                                 if (item.aiAnalysis.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text("AI 解析：", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                                    Text(item.aiAnalysis)
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            item.aiAnalysis,
+                                            modifier = Modifier.padding(12.dp),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
                                 }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("最后更改：", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                val date = java.util.Date(item.updatedAt)
+                                val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                                Text(format.format(date), style = MaterialTheme.typography.bodySmall)
                             }
                         }
 
@@ -206,7 +255,7 @@ fun QrScanScreen(viewModel: QuestionViewModel = hiltViewModel()) {
                             horizontalArrangement = Arrangement.End
                         ) {
                             TextButton(onClick = {
-                                previewPayload = null
+                                viewModel.clearRemoteQuestion()
                                 scanResult = null
                             }) {
                                 Text("取消")
@@ -221,12 +270,12 @@ fun QrScanScreen(viewModel: QuestionViewModel = hiltViewModel()) {
                                         difficulty = item.difficulty,
                                         aiAnalysis = item.aiAnalysis,
                                         isArchived = item.isArchived,
-                                        archiveType = item.archiveType,
+                                        archiveType = item.archiveType ?: "",
                                         imagePath = "",
                                         createTime = System.currentTimeMillis()
                                     )
                                 )
-                                previewPayload = null
+                                viewModel.clearRemoteQuestion()
                                 scanResult = null
                             }) {
                                 Text("确认加入题库")
@@ -235,6 +284,16 @@ fun QrScanScreen(viewModel: QuestionViewModel = hiltViewModel()) {
                     }
                 }
             }
+        }
+    }
+}
+
+private fun handleScannedText(text: String, viewModel: QuestionViewModel) {
+    if (text.startsWith("studyclaw://question/")) {
+        val idStr = text.removePrefix("studyclaw://question/")
+        val cloudId = idStr.toIntOrNull()
+        if (cloudId != null) {
+            viewModel.fetchQuestionFromCloud(cloudId)
         }
     }
 }
@@ -250,14 +309,7 @@ fun ScannerOverlay() {
             modifier = Modifier
                 .size(260.dp)
                 .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-        ) {
-            // 四个角落的高亮
-            val cornerColor = MaterialTheme.colorScheme.primary
-            val cornerLength = 20.dp
-            val thickness = 4.dp
-
-            // 这里可以添加更复杂的角标绘制逻辑，简单起见用Border即可满足大部分美感
-        }
+        )
 
         // 扫描动态线（简单演示）
         Text(

@@ -7,13 +7,21 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.data.database.QuestionEntity
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
@@ -345,12 +353,19 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             modifier = Modifier.weight(1f).fillMaxWidth().padding(8.dp),
             state = listState
         ) {
-            items(messages) { msg ->
-                ChatBubble(msg)
-            }
-            if (isLoading && smoothStreamResponse.isNotBlank()) {
+            if (messages.isEmpty() && !isLoading) {
                 item {
-                    ChatBubble(ChatMessage(role = "assistant", content = smoothStreamResponse))
+                    val scope = this
+                    scope.EmptyStateHint()
+                }
+            } else {
+                items(messages) { msg ->
+                    ChatBubble(msg)
+                }
+                if (isLoading && smoothStreamResponse.isNotBlank()) {
+                    item {
+                        ChatBubble(ChatMessage(role = "assistant", content = smoothStreamResponse))
+                    }
                 }
             }
         }
@@ -856,3 +871,71 @@ private fun formatToolStatus(raw: String): String {
     }
 }
 
+@Composable
+fun LazyItemScope.EmptyStateHint() {
+    Column(
+        modifier = Modifier
+            .fillParentMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.AutoAwesome,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "StudyClaw AI",
+            style = MaterialTheme.typography.headlineMedium.copy(
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 2.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "智能错题管家已就绪",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            HintChip(Icons.Default.LibraryAdd, "快速录题")
+            HintChip(Icons.Default.Search, "查词搜题")
+            HintChip(Icons.Default.Inventory2, "智能归档")
+        }
+    }
+}
+
+@Composable
+fun HintChip(icon: ImageVector, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+            modifier = Modifier.size(48.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.padding(12.dp),
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        )
+    }
+}

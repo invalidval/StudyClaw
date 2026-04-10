@@ -61,6 +61,9 @@ class QuestionViewModel @Inject constructor(
     private val _syncMessage = MutableStateFlow<String?>(null)
     val syncMessage: StateFlow<String?> = _syncMessage.asStateFlow()
 
+    private val _remoteQuestion = MutableStateFlow<QuestionEntity?>(null)
+    val remoteQuestion: StateFlow<QuestionEntity?> = _remoteQuestion.asStateFlow()
+
     init {
         loadQuestions()
         loadArchiveTypes() // 初始化时加载归档类型
@@ -241,6 +244,29 @@ class QuestionViewModel @Inject constructor(
 
     fun clearError() {
         _error.value = null
+    }
+
+    fun fetchQuestionFromCloud(cloudId: Int) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            try {
+                val question = useCases.getQuestionFromCloud(cloudId)
+                if (question != null) {
+                    _remoteQuestion.value = question
+                } else {
+                    _error.value = "未找到题目信息"
+                }
+            } catch (e: Exception) {
+                _error.value = "获取题目失败: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun clearRemoteQuestion() {
+        _remoteQuestion.value = null
     }
 
     /**

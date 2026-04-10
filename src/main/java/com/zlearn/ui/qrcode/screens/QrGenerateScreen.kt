@@ -17,16 +17,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import com.zlearn.utils.QrCodeUtil
-import com.zlearn.utils.NfcShareCodec
-import com.zlearn.domain.model.SharePayload
-import com.zlearn.domain.model.ShareItem
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
-import java.security.MessageDigest
-import java.util.UUID
-import com.zlearn.data.database.QuestionEntity
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Share
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,9 +31,12 @@ fun QrGenerateScreen(id: Int, viewModel: QuestionViewModel = hiltViewModel()) {
 
     LaunchedEffect(question) {
         if (question != null) {
-            val payload = sharePayloadFromQuestion(question)
-            val encoded = NfcShareCodec.encode(payload)
-            qrBitmap = QrCodeUtil.encodeToBitmap(encoded)
+            // 只编码关键信息：云端 ID。如果没有云端 ID，提示用户先同步。
+            val cloudId = question.cloudId
+            if (cloudId != null) {
+                val encoded = "studyclaw://question/$cloudId"
+                qrBitmap = QrCodeUtil.encodeToBitmap(encoded)
+            }
         }
     }
 
@@ -93,13 +89,19 @@ fun QrGenerateScreen(id: Int, viewModel: QuestionViewModel = hiltViewModel()) {
                         )
 
                         Text(
-                            text = "请另一台设备扫码录入此题",
+                            text = "请通过云端 ID 分享此题",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 8.dp)
                         )
                     } else {
-                        CircularProgressIndicator(modifier = Modifier.padding(48.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (question?.cloudId == null) {
+                                Text("请先同步此题目到云端再生成二维码", color = MaterialTheme.colorScheme.error)
+                            } else {
+                                CircularProgressIndicator(modifier = Modifier.padding(48.dp))
+                            }
+                        }
                     }
                 }
             }
@@ -132,28 +134,4 @@ fun QrGenerateScreen(id: Int, viewModel: QuestionViewModel = hiltViewModel()) {
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
-}
-
-fun sharePayloadFromQuestion(question: QuestionEntity): SharePayload {
-    val hashInput = "${question.ocrText}|${question.summary}|${question.subject}"
-    val hash = MessageDigest.getInstance("SHA-256")
-        .digest(hashInput.toByteArray())
-        .joinToString("") { "%02x".format(it) }
-    return SharePayload(
-        sessionId = UUID.randomUUID().toString(),
-        senderDevice = android.os.Build.MODEL ?: "android",
-        createdAt = System.currentTimeMillis(),
-        items = listOf(
-            ShareItem(
-                contentHash = hash,
-                ocrText = question.ocrText,
-                summary = question.summary,
-                subject = question.subject,
-                difficulty = question.difficulty,
-                aiAnalysis = question.aiAnalysis,
-                isArchived = question.isArchived,
-                archiveType = question.archiveType ?: ""
-            )
-        )
-    )
 }
