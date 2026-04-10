@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -62,14 +63,47 @@ fun FlowingBorderTextField(
     )
 
     Box(modifier = modifier) {
-        // 底层：流光边框（仅当激活时显示）
         if (isActive) {
+            // 辉光层：带阴影效果的边框
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .clip(RoundedCornerShape(28.dp))
                     .drawBehind {
-                        val strokeWidth = 4.5.dp.toPx() // 原为1.8.dp，改为更宽
+                        val glowWidth = 12.dp.toPx()
+                        val gradient = Brush.linearGradient(
+                            colors = flowColors.map { it.copy(alpha = 0.3f) },
+                            start = Offset(
+                                x = size.width * gradientOffset,
+                                y = 0f
+                            ),
+                            end = Offset(
+                                x = size.width * (gradientOffset - 0.3f),
+                                y = size.height
+                            )
+                        )
+                        drawRoundRect(
+                            brush = gradient,
+                            style = Stroke(width = glowWidth),
+                            cornerRadius = CornerRadius(28.dp.toPx())
+                        )
+                    }
+                    .shadow(
+                        elevation = 20.dp,
+                        shape = RoundedCornerShape(28.dp),
+                        clip = false,
+                        spotColor = Color(0xFF6366F1).copy(alpha = 0.5f),
+                        ambientColor = Color(0xFFEC4899).copy(alpha = 0.3f)
+                    )
+            )
+
+            // 主边框层
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(28.dp))
+                    .drawBehind {
+                        val coreWidth = 2.dp.toPx()
                         val gradient = Brush.linearGradient(
                             colors = flowColors,
                             start = Offset(
@@ -83,7 +117,7 @@ fun FlowingBorderTextField(
                         )
                         drawRoundRect(
                             brush = gradient,
-                            style = Stroke(width = strokeWidth),
+                            style = Stroke(width = coreWidth),
                             cornerRadius = CornerRadius(28.dp.toPx())
                         )
                     }
