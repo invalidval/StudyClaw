@@ -34,10 +34,11 @@ import java.security.MessageDigest
 import java.util.UUID
 
 @Composable
+@Suppress("ModifierParameter")
 fun QuestionDetailScreen(
     id: Int,
-    navController: NavController? = null,
     modifier: Modifier = Modifier,
+    navController: NavController?,
     viewModel: QuestionViewModel = hiltViewModel()
 ) {
     val questions by viewModel.questions.collectAsState()
@@ -195,32 +196,49 @@ private fun startShare(
         uiHandler.post {
             when (result) {
                 BleShareTransport.AdvertiseStartResult.Started -> {
+                    // Register ACK listener after advertising starts. startAdvertising() calls
+                    // stopAdvertising() internally, which clears previous listeners.
+                    BleShareTransport.setOnAckReceivedListener { ackSessionId ->
+                        if (ackSessionId == sessionId) {
+                            uiHandler.post {
+                                NfcUtil.setOutgoingPayload(null)
+                                BleShareTransport.stopAdvertising()
+                                android.widget.Toast.makeText(context, "对方已收到并导入", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                     NfcUtil.setOutgoingPayload(sessionId)
-                    android.widget.Toast.makeText(context, "已准备分享，请让接收方打开NFC页后轻触", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, "已开始发送，等待对方确认", android.widget.Toast.LENGTH_SHORT).show()
                     navController?.navigate("nfc/sender")
                 }
 
                 BleShareTransport.AdvertiseStartResult.NotInitialized -> {
+                    BleShareTransport.setOnAckReceivedListener(null)
                     android.widget.Toast.makeText(context, "BLE 未初始化，请重试", android.widget.Toast.LENGTH_SHORT).show()
                 }
 
                 BleShareTransport.AdvertiseStartResult.BluetoothDisabled -> {
+                    BleShareTransport.setOnAckReceivedListener(null)
                     android.widget.Toast.makeText(context, "蓝牙未开启，请先打开蓝牙", android.widget.Toast.LENGTH_SHORT).show()
                 }
 
                 BleShareTransport.AdvertiseStartResult.MissingPermission -> {
+                    BleShareTransport.setOnAckReceivedListener(null)
                     android.widget.Toast.makeText(context, "缺少 BLE 权限，请先授权", android.widget.Toast.LENGTH_SHORT).show()
                 }
 
                 BleShareTransport.AdvertiseStartResult.AdvertiserUnavailable -> {
+                    BleShareTransport.setOnAckReceivedListener(null)
                     android.widget.Toast.makeText(context, "当前设备不支持 BLE 广播", android.widget.Toast.LENGTH_SHORT).show()
                 }
 
                 BleShareTransport.AdvertiseStartResult.GattServerOpenFailed -> {
+                    BleShareTransport.setOnAckReceivedListener(null)
                     android.widget.Toast.makeText(context, "GATT 服务启动失败，请重试", android.widget.Toast.LENGTH_SHORT).show()
                 }
 
                 is BleShareTransport.AdvertiseStartResult.Failed -> {
+                    BleShareTransport.setOnAckReceivedListener(null)
                     android.widget.Toast.makeText(context, "BLE 广播失败，错误码: ${result.errorCode}", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }

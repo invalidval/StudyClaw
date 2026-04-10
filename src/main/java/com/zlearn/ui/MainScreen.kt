@@ -28,8 +28,8 @@ fun MainScreen() {
     val navController = rememberNavController()
     val items = listOf(
         NavItem("题库", "question_list", Icons.AutoMirrored.Filled.List),
-        NavItem("复习", "review", Icons.Filled.Refresh),
-        NavItem("NFC", "nfc/receiver", Icons.Filled.Info), // 默认进入接收模式
+        NavItem("便携二维码", "review", Icons.Filled.Refresh),
+        NavItem("邮享互传", "nfc/receiver", Icons.Filled.Info), // 默认进入接收模式
         NavItem("StudyClaw", "focus", Icons.Filled.Star)
     )
     Scaffold(

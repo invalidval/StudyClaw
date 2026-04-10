@@ -22,10 +22,20 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 sealed interface NfcUiState {
     data object Idle : NfcUiState
     data class Detected(val payload: String, val eventId: Long) : NfcUiState
-    data class Importing(val payload: String, val eventId: Long) : NfcUiState
-    data class Result(val message: String) : NfcUiState
+    data class Importing(val payload: String, val eventId: Long, val preview: SharePreview? = null) : NfcUiState
+    data class Result(val message: String, val preview: SharePreview? = null) : NfcUiState
     data class Error(val message: String) : NfcUiState
 }
+
+data class SharePreview(
+    val sessionId: String,
+    val senderDevice: String,
+    val subject: String,
+    val difficulty: Int,
+    val itemCount: Int,
+    val summary: String,
+    val ocrText: String
+)
 
 @HiltViewModel
 class NfcViewModel @Inject constructor(
@@ -41,6 +51,19 @@ class NfcViewModel @Inject constructor(
     private var importTimeoutJob: Job? = null
     private val importTimeoutMs = 45_000L
 
+    private fun buildPreview(payload: com.zlearn.domain.model.SharePayload): SharePreview {
+        val firstItem = payload.items.firstOrNull()
+        return SharePreview(
+            sessionId = payload.sessionId,
+            senderDevice = payload.senderDevice,
+            subject = firstItem?.subject.orEmpty(),
+            difficulty = firstItem?.difficulty ?: 0,
+            itemCount = payload.items.size,
+            summary = firstItem?.summary.orEmpty(),
+            ocrText = firstItem?.ocrText.orEmpty()
+        )
+    }
+
     init {
         viewModelScope.launch {
             NfcUtil.incomingPayload.collect { payload ->
@@ -55,6 +78,7 @@ class NfcViewModel @Inject constructor(
             }
         }
     }
+
 
     fun importDetectedPayload() {
         val current = _uiState.value
@@ -76,8 +100,9 @@ class NfcViewModel @Inject constructor(
                         val payload = NfcShareCodec.decode(data).getOrNull()
                         val shouldValidateSession = current.payload.isNotBlank() && !current.payload.startsWith("TAG_ID:")
                         if (payload != null && (!shouldValidateSession || payload.sessionId == current.payload)) {
-                            importTimeoutJob?.cancel()
-                            BleShareTransport.stopScanning()
+                            val preview = buildPreview(payload)
+                            _uiState.value = NfcUiState.Importing(data, current.eventId, preview)
+                            delay(250)
                             var imported = 0
                             for (item in payload.items) {
                                 val entity = QuestionEntity(
@@ -95,7 +120,22 @@ class NfcViewModel @Inject constructor(
                                 useCases.addQuestion(entity)
                                 imported++
                             }
-                            _uiState.value = NfcUiState.Result("导入成功: $imported 条题目")
+                            val ackSent = BleShareTransport.sendAck(payload.sessionId) { ok ->
+                                viewModelScope.launch {
+                                    importTimeoutJob?.cancel()
+                                    BleShareTransport.stopScanning()
+                                    _uiState.value = if (ok) {
+                                        NfcUiState.Result("已收到并导入: $imported 条题目", preview)
+                                    } else {
+                                        NfcUiState.Error("已导入，但未能向发送方回传确认")
+                                    }
+                                }
+                            }
+                            if (!ackSent) {
+                                importTimeoutJob?.cancel()
+                                BleShareTransport.stopScanning()
+                                _uiState.value = NfcUiState.Result("已收到并导入: $imported 条题目", preview)
+                            }
                         } else {
                             importTimeoutJob?.cancel()
                             BleShareTransport.stopScanning()
@@ -137,7 +177,11 @@ class NfcViewModel @Inject constructor(
 
     fun reset() {
         importTimeoutJob?.cancel()
+        importTimeoutJob = null
         BleShareTransport.stopScanning()
+        lastPayload = null
+        lastEventAtMs = 0
+        eventSeq = 0
         _uiState.value = NfcUiState.Idle
     }
 }

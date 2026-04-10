@@ -7,6 +7,7 @@ import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.Ndef
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -30,6 +31,15 @@ object NfcUtil {
 
     fun setOutgoingPayload(payload: String?) {
         _outgoingPayload.value = payload
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun clearIncomingPayload() {
+        _incomingPayload.resetReplayCache()
+    }
+
+    fun clearOutgoingPayload() {
+        _outgoingPayload.value = null
     }
 
     fun publishIncomingPayload(payload: String) {
