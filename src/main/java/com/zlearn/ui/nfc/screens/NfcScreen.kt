@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -51,6 +53,7 @@ fun NfcScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val outgoingPayload by NfcUtil.outgoingPayload.collectAsState()
+    val senderShareState by NfcUtil.senderShareState.collectAsState()
     val isReceiverMode = mode == "receiver"
     val context = LocalContext.current
     var showPermissionDialog by remember { mutableStateOf(false) }
@@ -68,18 +71,20 @@ fun NfcScreen(
             NfcUtil.setReceiverEnabled(false)
             NfcUtil.clearIncomingPayload()
             NfcUtil.clearOutgoingPayload()
+            NfcUtil.clearSenderShareState()
             BleShareTransport.stopScanning()
             BleShareTransport.stopAdvertising()
             viewModel.reset()
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
         Text(text = "NFC 分享", style = MaterialTheme.typography.headlineSmall)
         Text(if (isReceiverMode) "当前为接收模式（仅本页面开启）" else "当前为发送模式（不会开启接收）")
 
@@ -88,6 +93,7 @@ fun NfcScreen(
             CircularProgressIndicator()
             Button(onClick = {
                 NfcUtil.setOutgoingPayload(null)
+                NfcUtil.clearSenderShareState()
                 BleShareTransport.stopAdvertising()
             }) { Text("清空待发送") }
         }
@@ -124,6 +130,15 @@ fun NfcScreen(
                 Button(onClick = { viewModel.reset() }) { Text("重试") }
             }
         }
+
+    }
+
+        if (!isReceiverMode) {
+            SenderCenterStatusCard(
+                state = senderShareState,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
     }
 
     if (showPermissionDialog) {
@@ -141,6 +156,46 @@ fun NfcScreen(
                 Button(onClick = { showPermissionDialog = false }) { Text("取消") }
             }
         )
+    }
+}
+
+@Composable
+private fun SenderCenterStatusCard(
+    state: NfcUtil.SenderShareState,
+    modifier: Modifier = Modifier,
+) {
+    if (state is NfcUtil.SenderShareState.Idle) return
+
+    Card(
+        modifier = modifier.fillMaxWidth(0.86f),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            when (state) {
+                is NfcUtil.SenderShareState.WaitingAck -> {
+                    Text("发送中", style = MaterialTheme.typography.titleMedium)
+                    Text("等待对方确认接收", style = MaterialTheme.typography.bodyMedium)
+                    CircularProgressIndicator()
+                }
+
+                is NfcUtil.SenderShareState.Completed -> {
+                    Text("发送完成", style = MaterialTheme.typography.titleMedium)
+                    Text(state.message, style = MaterialTheme.typography.bodyMedium)
+                }
+
+                is NfcUtil.SenderShareState.Error -> {
+                    Text("发送失败", style = MaterialTheme.typography.titleMedium)
+                    Text(state.message, style = MaterialTheme.typography.bodyMedium)
+                }
+
+                NfcUtil.SenderShareState.Idle -> Unit
+            }
+        }
     }
 }
 

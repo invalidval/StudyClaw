@@ -23,7 +23,7 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(client: OkHttpClient): Retrofit =
         Retrofit.Builder()
-            .baseUrl("http://192.168.1.104:8080/") // TODO: 替换为实际后端地址和端口
+            .baseUrl("http://10.129.94.211:8080/") // TODO: 替换为实际后端地址和端口
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()

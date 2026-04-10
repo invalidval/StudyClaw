@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "questions")
 data class QuestionEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val cloudId: Int? = null,
     val imagePath: String,
     val ocrText: String,
     val aiAnalysis: String,
@@ -14,5 +15,6 @@ data class QuestionEntity(
     val difficulty: Int,
     val createTime: Long,
     val isArchived: Boolean,
-    val archiveType: String? = null // 归档类型，可为空
+    val archiveType: String? = null, // 归档类型，可为空
+    val updatedAt: Long = System.currentTimeMillis()
 )

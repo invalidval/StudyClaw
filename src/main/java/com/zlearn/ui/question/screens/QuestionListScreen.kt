@@ -6,18 +6,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import com.zlearn.data.database.QuestionEntity
 import com.zlearn.ui.question.components.QuestionCard
 import androidx.navigation.NavController
+import com.zlearn.viewmodel.AuthState
+import com.zlearn.viewmodel.UserViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuestionListScreen(
     modifier: Modifier = Modifier,
     viewModel: QuestionViewModel = hiltViewModel(),
+    userViewModel: UserViewModel = hiltViewModel(),
     navController: NavController
 ) {
     var showActionSheet by remember { mutableStateOf(false) }
@@ -39,9 +43,37 @@ fun QuestionListScreen(
     }
     val archiveTypes by viewModel.archiveTypes.collectAsState()
     val filteredQuestions by viewModel.filteredQuestions.collectAsState()
+    val syncing by viewModel.syncing.collectAsState()
+    val syncMessage by viewModel.syncMessage.collectAsState()
+    val authState by userViewModel.authState.collectAsState()
+    val token by userViewModel.token.collectAsState()
     var showArchiveTypeDialog by remember { mutableStateOf(false) }
     var archiveTypeInput by remember { mutableStateOf("") }
     var showFilterMenu by remember { mutableStateOf(false) }
+    var showLoginDialog by remember { mutableStateOf(false) }
+    var isRegisterMode by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    LaunchedEffect(authState) {
+        if (authState is AuthState.Success) {
+            val savedToken = token
+            if (!savedToken.isNullOrBlank()) {
+                showLoginDialog = false
+                userViewModel.resetAuthState()
+                viewModel.syncQuestions(savedToken)
+            }
+        }
+    }
+
+    LaunchedEffect(syncMessage) {
+        if (!syncMessage.isNullOrBlank()) {
+            kotlinx.coroutines.delay(2500)
+            viewModel.clearSyncMessage()
+        }
+    }
+
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(onClick = { navController.navigate("add_question") }) {
@@ -54,6 +86,29 @@ fun QuestionListScreen(
             Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { showFilterMenu = true }) {
                     Text("筛选归档:")
+                }
+                Button(
+                    onClick = {
+                        if (token.isNullOrBlank()) {
+                            isRegisterMode = false
+                            showLoginDialog = true
+                        } else {
+                            viewModel.syncQuestions(token!!)
+                        }
+                    },
+                    enabled = !syncing,
+                    modifier = Modifier.padding(start = 8.dp)
+                ) {
+                    Text(if (syncing) "同步中..." else "同步")
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                if (!token.isNullOrBlank()) {
+                    TextButton(
+                        onClick = { showLogoutDialog = true },
+                        enabled = !syncing
+                    ) {
+                        Text("退出登录")
+                    }
                 }
                 DropdownMenu(
                     expanded = showFilterMenu,
@@ -79,6 +134,13 @@ fun QuestionListScreen(
                         Text("清除筛选")
                     }
                 }
+            }
+            if (!syncMessage.isNullOrBlank()) {
+                Text(
+                    text = syncMessage!!,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
             }
             // --- 分组展示归档内容 ---
             val displayQuestions = if (selectedArchiveType != null) filteredQuestions else questions
@@ -152,6 +214,106 @@ fun QuestionListScreen(
                     TextButton(onClick = { showActionSheet = false }) { Text("取消") }
                 }
             }
+        }
+        if (showLoginDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    if (authState !is AuthState.Loading) {
+                        showLoginDialog = false
+                        isRegisterMode = false
+                        userViewModel.resetAuthState()
+                    }
+                },
+                title = { Text(if (isRegisterMode) "注册后同步" else "登录后同步") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = it },
+                            label = { Text("用户名") },
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("密码") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true
+                        )
+                        if (authState is AuthState.Error) {
+                            Text(
+                                text = (authState as AuthState.Error).message,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (isRegisterMode) {
+                                userViewModel.register(username, password)
+                            } else {
+                                userViewModel.login(username, password)
+                            }
+                        },
+                        enabled = authState !is AuthState.Loading
+                    ) {
+                        val loadingText = if (isRegisterMode) "注册中..." else "登录中..."
+                        val normalText = if (isRegisterMode) "注册并同步" else "登录并同步"
+                        Text(if (authState is AuthState.Loading) loadingText else normalText)
+                    }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                isRegisterMode = !isRegisterMode
+                                userViewModel.resetAuthState()
+                            },
+                            enabled = authState !is AuthState.Loading
+                        ) {
+                            Text(if (isRegisterMode) "已有账号？去登录" else "没有账号？去注册")
+                        }
+                        TextButton(
+                            onClick = {
+                                showLoginDialog = false
+                                isRegisterMode = false
+                                userViewModel.resetAuthState()
+                            },
+                            enabled = authState !is AuthState.Loading
+                        ) {
+                            Text("取消")
+                        }
+                    }
+                }
+            )
+        }
+        if (showLogoutDialog) {
+            AlertDialog(
+                onDismissRequest = { showLogoutDialog = false },
+                title = { Text("退出登录") },
+                text = { Text("确认退出当前账号吗？") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        userViewModel.logout()
+                        userViewModel.resetAuthState()
+                        viewModel.clearSyncMessage()
+                        showLoginDialog = false
+                        isRegisterMode = false
+                        showLogoutDialog = false
+                        username = ""
+                        password = ""
+                    }) {
+                        Text("确认")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLogoutDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            )
         }
         if (showArchiveTypeDialog && selectedQuestion != null) {
             AlertDialog(

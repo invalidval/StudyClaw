@@ -16,6 +16,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 object NfcUtil {
+    sealed interface SenderShareState {
+        data object Idle : SenderShareState
+        data class WaitingAck(val sessionId: String) : SenderShareState
+        data class Completed(val message: String) : SenderShareState
+        data class Error(val message: String) : SenderShareState
+    }
+
     private val _incomingPayload = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 1)
     val incomingPayload: SharedFlow<String> = _incomingPayload.asSharedFlow()
 
@@ -24,6 +31,9 @@ object NfcUtil {
 
     private val _outgoingPayload = MutableStateFlow<String?>(null)
     val outgoingPayload: StateFlow<String?> = _outgoingPayload.asStateFlow()
+
+    private val _senderShareState = MutableStateFlow<SenderShareState>(SenderShareState.Idle)
+    val senderShareState: StateFlow<SenderShareState> = _senderShareState.asStateFlow()
 
     fun setReceiverEnabled(enabled: Boolean) {
         _receiverEnabled.value = enabled
@@ -40,6 +50,14 @@ object NfcUtil {
 
     fun clearOutgoingPayload() {
         _outgoingPayload.value = null
+    }
+
+    fun setSenderShareState(state: SenderShareState) {
+        _senderShareState.value = state
+    }
+
+    fun clearSenderShareState() {
+        _senderShareState.value = SenderShareState.Idle
     }
 
     fun publishIncomingPayload(payload: String) {

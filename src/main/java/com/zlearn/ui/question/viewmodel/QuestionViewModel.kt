@@ -55,6 +55,12 @@ class QuestionViewModel @Inject constructor(
     private val _filteredQuestions = MutableStateFlow<List<QuestionEntity>>(emptyList())
     val filteredQuestions: StateFlow<List<QuestionEntity>> = _filteredQuestions.asStateFlow()
 
+    private val _syncing = MutableStateFlow(false)
+    val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
+
+    private val _syncMessage = MutableStateFlow<String?>(null)
+    val syncMessage: StateFlow<String?> = _syncMessage.asStateFlow()
+
     init {
         loadQuestions()
         loadArchiveTypes() // 初始化时加载归档类型
@@ -182,13 +188,38 @@ class QuestionViewModel @Inject constructor(
             try {
                 val question = useCases.getQuestionById(id)
                 if (question != null) {
-                    useCases.updateQuestion(question.copy(aiAnalysis = newAnalysis))
+                    useCases.updateQuestion(
+                        question.copy(
+                            aiAnalysis = newAnalysis,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    )
                     loadQuestions()
                 }
             } catch (e: Exception) {
                 _error.value = "更新AI分析失败: ${e.message}"
             }
         }
+    }
+
+    fun syncQuestions(token: String) {
+        viewModelScope.launch {
+            _syncing.value = true
+            _syncMessage.value = null
+            try {
+                _syncMessage.value = useCases.syncQuestions(token)
+                loadQuestions()
+                loadArchiveTypes()
+            } catch (e: Exception) {
+                _syncMessage.value = e.message ?: "同步失败"
+            } finally {
+                _syncing.value = false
+            }
+        }
+    }
+
+    fun clearSyncMessage() {
+        _syncMessage.value = null
     }
 
     fun clearAiStreamResponse() {
