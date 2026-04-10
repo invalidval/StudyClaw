@@ -104,6 +104,12 @@ fun QuestionDetailScreen(
                 }) {
                     Text("NFC分享")
                 }
+                Spacer(modifier = Modifier.width(12.dp))
+                Button(onClick = {
+                    navController?.navigate("qrcode/generate/${question.id}")
+                }) {
+                    Text("生成二维码")
+                }
             }
 
             // AI 回复内容

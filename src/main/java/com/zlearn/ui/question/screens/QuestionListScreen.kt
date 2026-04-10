@@ -6,15 +6,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import com.zlearn.data.database.QuestionEntity
+import com.zlearn.ui.question.components.GroupItemPosition
 import com.zlearn.ui.question.components.QuestionCard
 import androidx.navigation.NavController
 import com.zlearn.viewmodel.AuthState
 import com.zlearn.viewmodel.UserViewModel
+import kotlin.math.absoluteValue
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,6 +58,7 @@ fun QuestionListScreen(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
 
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
@@ -146,11 +150,20 @@ fun QuestionListScreen(
             val displayQuestions = if (selectedArchiveType != null) filteredQuestions else questions
             if (selectedArchiveType != null) {
                 // 只展示筛选结果，不分组
+                val selectedTypeColor = archiveTypeColor(selectedArchiveType.orEmpty(), isDarkTheme)
                 LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     items(displayQuestions.size) { index ->
                         val q = displayQuestions[index]
+                        val position = when {
+                            displayQuestions.size == 1 -> GroupItemPosition.Single
+                            index == 0 -> GroupItemPosition.First
+                            index == displayQuestions.lastIndex -> GroupItemPosition.Last
+                            else -> GroupItemPosition.Middle
+                        }
                         QuestionCard(
                             summary = if (q.summary.isNotBlank()) q.summary else q.ocrText.take(20),
+                            position = position,
+                            containerColor = selectedTypeColor,
                             onClick = {
                                 println("[DEBUG] Card clicked, id=${q.id}")
                                 navController.navigate("question_detail/${q.id}")
@@ -171,18 +184,27 @@ fun QuestionListScreen(
                     archiveTypeList.forEach { type ->
                         val groupTitle = if (type.isBlank()) "未归档" else type
                         val groupQuestions = grouped[type] ?: emptyList()
+                        val groupColor = archiveTypeColor(type, isDarkTheme)
                         if (groupQuestions.isNotEmpty()) {
                             item {
                                 Text(
                                     groupTitle,
                                     style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.padding(top = 12.dp, start = 12.dp, bottom = 4.dp)
+                                    modifier = Modifier.padding(top = 14.dp, start = 12.dp, bottom = 6.dp)
                                 )
                             }
                             items(groupQuestions.size) { index ->
                                 val q = groupQuestions[index]
+                                val position = when {
+                                    groupQuestions.size == 1 -> GroupItemPosition.Single
+                                    index == 0 -> GroupItemPosition.First
+                                    index == groupQuestions.lastIndex -> GroupItemPosition.Last
+                                    else -> GroupItemPosition.Middle
+                                }
                                 QuestionCard(
                                     summary = if (q.summary.isNotBlank()) q.summary else q.ocrText.take(20),
+                                    position = position,
+                                    containerColor = groupColor,
                                     onClick = {
                                         println("[DEBUG] Card clicked, id=${q.id}")
                                         navController.navigate("question_detail/${q.id}")
@@ -353,3 +375,30 @@ fun QuestionListScreen(
     }
 
 }
+
+private fun archiveTypeColor(archiveType: String, isDarkTheme: Boolean): Color {
+    val lightPalette = listOf(
+        Color(0xFFFFF5D9),
+        Color(0xFFE9F7E8),
+        Color(0xFFEAF2FF),
+        Color(0xFFFFEDEA),
+        Color(0xFFF3EEFF),
+        Color(0xFFE8F7F7),
+        Color(0xFFFFF0E0),
+        Color(0xFFEFF3D8)
+    )
+    val darkPalette = listOf(
+        Color(0xFF4A4330),
+        Color(0xFF304536),
+        Color(0xFF2F3F58),
+        Color(0xFF533638),
+        Color(0xFF403654),
+        Color(0xFF2E4648),
+        Color(0xFF544335),
+        Color(0xFF3F4731)
+    )
+    val key = if (archiveType.isBlank()) "__ungrouped__" else archiveType
+    val colors = if (isDarkTheme) darkPalette else lightPalette
+    return colors[key.hashCode().absoluteValue % colors.size]
+}
+

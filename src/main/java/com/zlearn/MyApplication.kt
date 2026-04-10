@@ -16,7 +16,7 @@ class MyApplication : Application() {
     private val client = OkHttpClient()
 
     // 手动设置应用模式：DEV（开发）、PRE（预发布）、REL（发布）
-    val appMode = AppMode.PRE  // 更改此值以切换模式
+    val appMode = AppMode.DEV  // 更改此值以切换模式
 
     override fun onCreate() {
         super.onCreate()

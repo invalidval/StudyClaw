@@ -3,6 +3,7 @@ package com.zlearn.ui.nfc.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
@@ -12,6 +13,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,11 +22,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -83,60 +90,148 @@ fun NfcScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-        Text(text = "NFC 分享", style = MaterialTheme.typography.headlineSmall)
-        Text(if (isReceiverMode) "当前为接收模式（仅本页面开启）" else "当前为发送模式（不会开启接收）")
+            HeaderModeCard(isReceiverMode = isReceiverMode)
 
-        if (!outgoingPayload.isNullOrBlank() && !isReceiverMode) {
-            Text("待发送会话已准备")
-            CircularProgressIndicator()
-            Button(onClick = {
-                NfcUtil.setOutgoingPayload(null)
-                NfcUtil.clearSenderShareState()
-                BleShareTransport.stopAdvertising()
-            }) { Text("清空待发送") }
-        }
-
-        when (val state = uiState) {
-            NfcUiState.Idle -> Text("等待 NFC 轻触唤醒...")
-
-            is NfcUiState.Detected -> {
-                Text("检测到分享请求")
-                Text("Payload: ${state.payload}")
-                Text("会话序号: ${state.eventId}")
-                Button(onClick = { viewModel.importDetectedPayload() }) { Text("确认导入") }
-            }
-
-            is NfcUiState.Importing -> {
-                SharePreviewStageCard(preview = state.preview, statusText = "已收到，正在导入...")
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("正在导入...")
-                CircularProgressIndicator()
-            }
-
-            is NfcUiState.Result -> {
-                SharePreviewStageCard(preview = state.preview, statusText = "已收到并完成导入")
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(state.message)
-                Button(onClick = { viewModel.reset() }) { Text("完成") }
-            }
-
-            is NfcUiState.Error -> {
-                Text("错误: ${state.message}")
-                if (state.message.contains("权限") && !hasBlePermissions) {
-                    Button(onClick = { showPermissionDialog = true }) { Text("申请 BLE 权限") }
+            if (!outgoingPayload.isNullOrBlank() && !isReceiverMode) {
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text("待发送会话已准备", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "保持当前页面，轻触后会自动广播会话。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.78f)
+                        )
+                        OutlinedButton(onClick = {
+                            NfcUtil.setOutgoingPayload(null)
+                            NfcUtil.clearSenderShareState()
+                            BleShareTransport.stopAdvertising()
+                        }) { Text("清空待发送") }
+                    }
                 }
-                Button(onClick = { viewModel.reset() }) { Text("重试") }
+            }
+
+            when (val state = uiState) {
+                NfcUiState.Idle -> {
+                    StateCard(
+                        title = "等待 NFC 轻触唤醒",
+                        message = "保持手机靠近，检测到请求后会显示导入预览。",
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                }
+
+                is NfcUiState.Detected -> {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("检测到分享请求", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "会话序号：${state.eventId}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                            )
+                            Text(
+                                "Payload：${state.payload}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.68f)
+                            )
+                            FilledTonalButton(onClick = { viewModel.importDetectedPayload() }) {
+                                Text("确认导入")
+                            }
+                        }
+                    }
+                }
+
+                is NfcUiState.Importing -> {
+                    SharePreviewStageCard(preview = state.preview, statusText = "已收到，正在导入")
+                    StateCard(
+                        title = "正在导入错题",
+                        message = "请保持应用在前台，导入完成后会给出结果。",
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        footer = {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    )
+                }
+
+                is NfcUiState.Result -> {
+                    SharePreviewStageCard(preview = state.preview, statusText = "已收到并完成导入")
+                    StateCard(
+                        title = "导入完成",
+                        message = state.message,
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        footer = {
+                            Button(onClick = { viewModel.reset() }) { Text("完成") }
+                        }
+                    )
+                }
+
+                is NfcUiState.Error -> {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text("出现错误", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                state.message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.86f)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (state.message.contains("权限") && !hasBlePermissions) {
+                                    OutlinedButton(onClick = { showPermissionDialog = true }) {
+                                        Text("申请 BLE 权限")
+                                    }
+                                }
+                                Button(onClick = { viewModel.reset() }) { Text("重试") }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (uiState is NfcUiState.Importing) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(strokeWidth = 2.4.dp)
+                }
             }
         }
-
-    }
 
         if (!isReceiverMode) {
             SenderCenterStatusCard(
                 state = senderShareState,
-                modifier = Modifier.align(Alignment.Center)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 20.dp)
             )
         }
     }
@@ -160,6 +255,66 @@ fun NfcScreen(
 }
 
 @Composable
+private fun HeaderModeCard(isReceiverMode: Boolean) {
+    val tone = if (isReceiverMode) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.tertiaryContainer
+    }
+    val modeText = if (isReceiverMode) "接收模式" else "发送模式"
+    val description = if (isReceiverMode) {
+        "仅在当前页面开启接收，离开页面后自动关闭。"
+    } else {
+        "当前仅发送，不会主动开启接收监听。"
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = tone,
+        shadowElevation = 8.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text("NFC 分享", style = MaterialTheme.typography.headlineSmall)
+            Text(modeText, style = MaterialTheme.typography.titleMedium)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StateCard(
+    title: String,
+    message: String,
+    containerColor: androidx.compose.ui.graphics.Color,
+    footer: @Composable (() -> Unit)? = null,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            footer?.invoke()
+        }
+    }
+}
+
+@Composable
 private fun SenderCenterStatusCard(
     state: NfcUtil.SenderShareState,
     modifier: Modifier = Modifier,
@@ -169,7 +324,8 @@ private fun SenderCenterStatusCard(
     Card(
         modifier = modifier.fillMaxWidth(0.86f),
         shape = RoundedCornerShape(20.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 14.dp)
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
@@ -180,7 +336,7 @@ private fun SenderCenterStatusCard(
                 is NfcUtil.SenderShareState.WaitingAck -> {
                     Text("发送中", style = MaterialTheme.typography.titleMedium)
                     Text("等待对方确认接收", style = MaterialTheme.typography.bodyMedium)
-                    CircularProgressIndicator()
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
 
                 is NfcUtil.SenderShareState.Completed -> {
@@ -222,7 +378,10 @@ private fun SharePreviewStageCard(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(statusText, style = MaterialTheme.typography.titleMedium)
                 Text("来自：${actualPreview.senderDevice}", style = MaterialTheme.typography.bodyMedium)
                 HorizontalDivider()

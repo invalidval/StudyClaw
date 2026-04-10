@@ -56,12 +56,20 @@ fun NavGraph() {
             val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
             QuestionDetailScreen(id = id, navController = navController)
         }
-        composable("review") { ReviewScreen() }
+        composable("qrcode") { ReviewScreen() }
+        composable("review") { ReviewScreen() } // compatibility route
         composable("nfc") { NfcScreen(mode = "receiver") }
         composable("nfc/{mode}") { backStackEntry: NavBackStackEntry ->
             val mode = backStackEntry.arguments?.getString("mode") ?: "receiver"
             NfcScreen(mode = mode)
         }
         composable("focus") { FocusScreen() }
+        composable("qrcode/generate/{id}") { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
+            com.zlearn.ui.qrcode.screens.QrGenerateScreen(id = id)
+        }
+        composable("qrcode/scan") {
+            com.zlearn.ui.qrcode.screens.QrScanScreen()
+        }
     }
 }

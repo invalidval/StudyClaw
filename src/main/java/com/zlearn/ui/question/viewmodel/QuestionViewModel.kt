@@ -87,6 +87,19 @@ class QuestionViewModel @Inject constructor(
         }
     }
 
+    fun updateQuestion(question: QuestionEntity) {
+        viewModelScope.launch {
+            try {
+                useCases.updateQuestion(
+                    question.copy(updatedAt = System.currentTimeMillis())
+                )
+                loadQuestions()
+            } catch (e: Exception) {
+                _error.value = "更新题目失败: ${e.message}"
+            }
+        }
+    }
+
     fun deleteQuestion(question: QuestionEntity) {
         viewModelScope.launch {
             try {

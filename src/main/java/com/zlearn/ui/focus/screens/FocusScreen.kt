@@ -1,5 +1,7 @@
 package com.zlearn.ui.focus.screens
 
+import android.content.Context
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,11 +12,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.data.database.QuestionEntity
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import com.zlearn.ui.components.AiInputBar
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
@@ -24,6 +29,7 @@ fun FocusScreen(modifier: Modifier = Modifier) {
     val aiStreamResponse by viewModel.aiStreamResponse.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     val systemPrompt = """
 你是 StudyClaw 智能错题本的 AI 助手，只能用中文与用户交流，风格简洁专业。
@@ -38,9 +44,9 @@ fun FocusScreen(modifier: Modifier = Modifier) {
 - 工具调用后，请根据工具返回结果，用简洁自然语言总结反馈，不要直接输出 JSON。
 - 用户询问“是否归档/归档类型/归档状态”时，必须先调用 query 获取字段（isArchived、archiveType）再回答，不要凭空判断。
 - 若用户要求“自动归档到合适分类/智能分类批量处理”，你应先 query 获取目标集合，再按每条错题内容生成具体 archiveType；禁止把整批都归到“auto-classified”这种笼统类型。
-- add 操作必须提供非空题干（可用 question/ocrText/questionText/title/content/题目/题干）；若字段缺失或仅为占位词，必须返回失败，不得入库。
+- add 操作必须提供非空题干（ocrText）；若字段缺失或仅为占位词，必须返回失败，不得入库。
 - 当用户明确要求“自动生成题目内容/举一反三”时，add 可使用自动生成模式（autoGenerate=true 或 mode=generate），由摘要/解析/学科生成题目草案后再入库。
-- 数据库字段（QuestionEntity）为：id, imagePath, ocrText, aiAnalysis, summary, subject, difficulty, createTime, isArchived, archiveType。
+- 数据库字段（QuestionEntity）为：id, cloudId, imagePath, ocrText, aiAnalysis, summary, subject, difficulty, createTime, isArchived, archiveType, deletedAt, updatedAt。
 - query 可指定 field(单个) 或 fields/selectFields(数组) 来返回所需属性；若未指定则返回常用字段。
 - query 返回 rows 时至少包含 id，便于后续 update/delete/archive/unarchive 精确操作。
 【重要】
@@ -52,9 +58,14 @@ fun FocusScreen(modifier: Modifier = Modifier) {
 6. 回答归档相关问题前必须基于 query 返回字段，不可臆测。
 """.trimIndent()
 
-    var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
+    var messages by remember { mutableStateOf(loadCachedMessages(context)) }
     var input by remember { mutableStateOf("") }
     var autoToolDepth by remember { mutableStateOf(0) }
+    var smoothStreamResponse by remember { mutableStateOf("") }
+            fun appendMessage(message: ChatMessage) {
+                messages = (messages + message).takeLast(MAX_CACHED_MESSAGES)
+            }
+
     val listState = rememberLazyListState()
     val maxAutoToolDepth = 5
     val maxHistoryRounds = 10
@@ -120,6 +131,7 @@ fun FocusScreen(modifier: Modifier = Modifier) {
     fun normalizeQueryField(name: String): String? {
         return when (name.trim()) {
             "id" -> "id"
+            "cloudId", "云端id", "云端ID" -> "cloudId"
             "imagePath", "图片路径" -> "imagePath"
             "ocrText", "question", "questionText", "题目", "题干" -> "ocrText"
             "aiAnalysis", "analysis", "解析" -> "aiAnalysis"
@@ -127,6 +139,9 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             "subject", "学科" -> "subject"
             "difficulty", "难度" -> "difficulty"
             "createTime", "创建时间" -> "createTime"
+            "updatedAt", "更新时间" -> "updatedAt"
+            "deleted", "是否删除", "已删除" -> "deleted"
+            "deletedAt", "删除时间" -> "deletedAt"
             "isArchived", "是否归档" -> "isArchived"
             "archiveType", "归档类型" -> "archiveType"
             else -> null
@@ -150,11 +165,68 @@ fun FocusScreen(modifier: Modifier = Modifier) {
         return normalized
     }
 
+    fun normalizeUpdateField(name: String): String? {
+        return when (name.trim()) {
+            "summary", "摘要" -> "summary"
+            "aiAnalysis", "analysis", "解析" -> "aiAnalysis"
+            "subject", "学科" -> "subject"
+            "difficulty", "难度" -> "difficulty"
+            "ocrText", "question", "questionText", "题目", "题干", "content", "title" -> "ocrText"
+            "imagePath", "图片路径" -> "imagePath"
+            else -> null
+        }
+    }
+
+    fun isArchiveFieldName(name: String): Boolean {
+        return when (name.trim()) {
+            "isArchived", "archiveType", "是否归档", "归档类型" -> true
+            else -> false
+        }
+    }
+
+    fun containsArchiveUpdateRequest(toolCall: JsonObject): Boolean {
+        val field = toolCall["field"]?.jsonPrimitive?.contentOrNull
+        if (!field.isNullOrBlank() && isArchiveFieldName(field)) return true
+
+        val fields = toolCall["fields"]?.jsonObject
+        if (fields?.keys?.any { isArchiveFieldName(it) } == true) return true
+
+        val reserved = setOf("action", "id", "ids", "field", "value", "fields")
+        if (toolCall.keys.any { key -> key !in reserved && isArchiveFieldName(key) }) return true
+
+        return false
+    }
+
+    fun resolveUpdatePayload(toolCall: JsonObject): Map<String, JsonElement> {
+        val merged = linkedMapOf<String, JsonElement>()
+
+        val fieldsObj = toolCall["fields"]?.jsonObject
+        fieldsObj?.forEach { (k, v) ->
+            normalizeUpdateField(k)?.let { normalized -> merged[normalized] = v }
+        }
+
+        val singleField = toolCall["field"]?.jsonPrimitive?.contentOrNull
+        val singleValue = toolCall["value"]
+        if (!singleField.isNullOrBlank() && singleValue != null) {
+            normalizeUpdateField(singleField)?.let { normalized -> merged[normalized] = singleValue }
+        }
+
+        val reserved = setOf("action", "id", "ids", "field", "value", "fields")
+        toolCall.forEach { (k, v) ->
+            if (k in reserved) return@forEach
+            val normalized = normalizeUpdateField(k) ?: return@forEach
+            if (!merged.containsKey(normalized)) merged[normalized] = v
+        }
+
+        return merged
+    }
+
     fun toQueryRow(q: QuestionEntity, fields: List<String>): JsonObject {
         val map = mutableMapOf<String, JsonElement>()
         fields.forEach { field ->
             when (field) {
                 "id" -> map["id"] = JsonPrimitive(q.id)
+                "cloudId" -> map["cloudId"] = q.cloudId?.let { JsonPrimitive(it) } ?: JsonNull
                 "imagePath" -> map["imagePath"] = JsonPrimitive(q.imagePath)
                 "ocrText" -> map["ocrText"] = JsonPrimitive(q.ocrText)
                 "aiAnalysis" -> map["aiAnalysis"] = JsonPrimitive(q.aiAnalysis)
@@ -162,6 +234,9 @@ fun FocusScreen(modifier: Modifier = Modifier) {
                 "subject" -> map["subject"] = JsonPrimitive(q.subject)
                 "difficulty" -> map["difficulty"] = JsonPrimitive(q.difficulty)
                 "createTime" -> map["createTime"] = JsonPrimitive(q.createTime)
+                "updatedAt" -> map["updatedAt"] = JsonPrimitive(q.updatedAt)
+                "deleted" -> map["deleted"] = JsonPrimitive(q.deletedAt != null)
+                "deletedAt" -> map["deletedAt"] = q.deletedAt?.let { JsonPrimitive(it) } ?: JsonNull
                 "isArchived" -> map["isArchived"] = JsonPrimitive(q.isArchived)
                 "archiveType" -> map["archiveType"] = JsonPrimitive(q.archiveType ?: "")
             }
@@ -273,12 +348,54 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             items(messages) { msg ->
                 ChatBubble(msg)
             }
-            if (isLoading && aiStreamResponse.isNotBlank()) {
+            if (isLoading && smoothStreamResponse.isNotBlank()) {
                 item {
-                    ChatBubble(ChatMessage(role = "assistant", content = aiStreamResponse))
+                    ChatBubble(ChatMessage(role = "assistant", content = smoothStreamResponse))
                 }
             }
         }
+
+        LaunchedEffect(aiStreamResponse, isLoading) {
+            if (!isLoading) {
+                smoothStreamResponse = ""
+                return@LaunchedEffect
+            }
+            if (aiStreamResponse.length <= smoothStreamResponse.length) {
+                smoothStreamResponse = aiStreamResponse
+                return@LaunchedEffect
+            }
+
+            val append = aiStreamResponse.substring(smoothStreamResponse.length)
+            var offset = 0
+            while (offset < append.length && isActive) {
+                val step = when {
+                    append.length > 240 -> 12
+                    append.length > 120 -> 8
+                    append.length > 60 -> 5
+                    else -> 3
+                }
+                val next = (offset + step).coerceAtMost(append.length)
+                smoothStreamResponse += append.substring(offset, next)
+                offset = next
+                delay(14)
+            }
+        }
+
+        LaunchedEffect(messages.size, smoothStreamResponse.length, isLoading) {
+            val hasStreamingBubble = isLoading && smoothStreamResponse.isNotBlank()
+            val lastIndex = messages.lastIndex + if (hasStreamingBubble) 1 else 0
+            if (lastIndex < 0) return@LaunchedEffect
+            if (hasStreamingBubble) {
+                listState.scrollToItem(lastIndex)
+            } else {
+                listState.animateScrollToItem(lastIndex)
+            }
+        }
+
+        LaunchedEffect(messages) {
+            saveCachedMessages(context, messages)
+        }
+
         LaunchedEffect(aiStreamResponse, isLoading) {
             if (aiStreamResponse.isBlank() || isLoading) return@LaunchedEffect
 
@@ -294,11 +411,11 @@ fun FocusScreen(modifier: Modifier = Modifier) {
                             "reason" to JsonPrimitive("检测到工具标记但未解析到合法 JSON，请按 #TOOL# { ... } 输出")
                         )
                     ).toString()
-                    messages = messages + ChatMessage(role = "tool", content = toolFail)
+                    appendMessage(ChatMessage(role = "tool", content = toolFail))
                     autoToolDepth = 0
                     return@LaunchedEffect
                 }
-                messages = messages + ChatMessage(role = "assistant", content = aiStreamResponse)
+                appendMessage(ChatMessage(role = "assistant", content = aiStreamResponse))
                 autoToolDepth = 0
                 return@LaunchedEffect
             }
@@ -310,7 +427,7 @@ fun FocusScreen(modifier: Modifier = Modifier) {
                         val toolCall = Json.parseToJsonElement(jsonPart).jsonObject
                         val action = toolCall["action"]?.jsonPrimitive?.content?.trim().orEmpty()
                         if (action.isBlank()) {
-                            messages = messages + ChatMessage(role = "tool", content = "工具调用 JSON 缺少 action 字段。\n原始内容：$jsonPart")
+                            appendMessage(ChatMessage(role = "tool", content = "工具调用 JSON 缺少 action 字段。\n原始内容：$jsonPart"))
                             continue
                         }
 
@@ -443,61 +560,61 @@ fun FocusScreen(modifier: Modifier = Modifier) {
                                     "reason" to JsonPrimitive("更新必须指定 id。请先 query。")
                                 )).toString()
                             } else {
-                                val field = toolCall["field"]?.jsonPrimitive?.content
-                                val value = toolCall["value"]
-                                val fields = toolCall["fields"]?.jsonObject
                                 val targets = all.filter { ids.contains(it.id) }
 
-                                val hasArchiveField =
-                                    (field == "isArchived" || field == "archiveType") ||
-                                        (fields?.keys?.any { it == "isArchived" || it == "archiveType" } == true)
-                                if (hasArchiveField) {
+                                if (targets.isEmpty()) {
+                                    toolResult = JsonObject(mapOf(
+                                        "result" to JsonPrimitive("fail"),
+                                        "action" to JsonPrimitive("update"),
+                                        "reason" to JsonPrimitive("未找到对应 id 的错题")
+                                    )).toString()
+                                } else if (containsArchiveUpdateRequest(toolCall)) {
                                     toolResult = JsonObject(mapOf(
                                         "result" to JsonPrimitive("fail"),
                                         "action" to JsonPrimitive("update"),
                                         "reason" to JsonPrimitive("归档相关字段必须使用 action=archive 调用预留归档接口")
                                     )).toString()
                                 } else {
-
-                                    val updated = targets.mapNotNull { q ->
-                                        if (fields != null && fields.isNotEmpty()) {
+                                    val payload = resolveUpdatePayload(toolCall)
+                                    if (payload.isEmpty()) {
+                                        val allowed = listOf("summary", "aiAnalysis", "subject", "difficulty", "ocrText", "imagePath")
+                                        val supplied = toolCall.keys.filter { it !in setOf("action", "id", "ids", "field", "value", "fields") }
+                                        toolResult = JsonObject(mapOf(
+                                            "result" to JsonPrimitive("fail"),
+                                            "action" to JsonPrimitive("update"),
+                                            "reason" to JsonPrimitive("缺少有效更新字段。允许字段: ${allowed.joinToString(",")}"),
+                                            "suppliedFields" to JsonArray(supplied.map { JsonPrimitive(it) })
+                                        )).toString()
+                                    } else {
+                                        var updatedCount = 0
+                                        targets.forEach { q ->
                                             var current = q
-                                            fields.forEach { (k, v) ->
-                                                if (k == "id") return@forEach
+                                            payload.forEach { (k, v) ->
                                                 current = when (k) {
-                                                    "summary" -> current.copy(summary = v.jsonPrimitive.content.ifBlank { current.summary })
-                                                    "aiAnalysis", "analysis", "解析" -> current.copy(aiAnalysis = v.jsonPrimitive.content.ifBlank { current.aiAnalysis })
-                                                    "subject" -> current.copy(subject = v.jsonPrimitive.content.ifBlank { current.subject })
+                                                    "summary" -> current.copy(summary = v.jsonPrimitive.contentOrNull?.ifBlank { current.summary } ?: current.summary)
+                                                    "aiAnalysis" -> current.copy(aiAnalysis = v.jsonPrimitive.contentOrNull?.ifBlank { current.aiAnalysis } ?: current.aiAnalysis)
+                                                    "subject" -> current.copy(subject = v.jsonPrimitive.contentOrNull?.ifBlank { current.subject } ?: current.subject)
                                                     "difficulty" -> current.copy(difficulty = v.jsonPrimitive.intOrNull ?: current.difficulty)
-                                                    "ocrText" -> current.copy(ocrText = v.jsonPrimitive.content.ifBlank { current.ocrText })
-                                                    "imagePath" -> current.copy(imagePath = v.jsonPrimitive.content.ifBlank { current.imagePath })
+                                                    "ocrText" -> current.copy(ocrText = v.jsonPrimitive.contentOrNull?.ifBlank { current.ocrText } ?: current.ocrText)
+                                                    "imagePath" -> current.copy(imagePath = v.jsonPrimitive.contentOrNull?.ifBlank { current.imagePath } ?: current.imagePath)
                                                     else -> current
                                                 }
                                             }
-                                            viewModel.addQuestion(current)
-                                            current
-                                        } else if (field != null) {
-                                            val changed = when (field) {
-                                                "summary" -> q.copy(summary = value?.jsonPrimitive?.content?.ifBlank { q.summary } ?: q.summary)
-                                                "aiAnalysis", "analysis", "解析" -> q.copy(aiAnalysis = value?.jsonPrimitive?.content?.ifBlank { q.aiAnalysis } ?: q.aiAnalysis)
-                                                "subject" -> q.copy(subject = value?.jsonPrimitive?.content?.ifBlank { q.subject } ?: q.subject)
-                                                "difficulty" -> q.copy(difficulty = value?.jsonPrimitive?.intOrNull ?: q.difficulty)
-                                                "ocrText" -> q.copy(ocrText = value?.jsonPrimitive?.content?.ifBlank { q.ocrText } ?: q.ocrText)
-                                                "imagePath" -> q.copy(imagePath = value?.jsonPrimitive?.content?.ifBlank { q.imagePath } ?: q.imagePath)
-                                                else -> q
+                                            if (current != q) {
+                                                viewModel.updateQuestion(current)
+                                                updatedCount += 1
                                             }
-                                            viewModel.addQuestion(changed)
-                                            changed
-                                        } else {
-                                            null
                                         }
-                                    }
 
-                                    toolResult = JsonObject(mapOf(
-                                        "result" to JsonPrimitive("success"),
-                                        "action" to JsonPrimitive("update"),
-                                        "updatedCount" to JsonPrimitive(updated.size)
-                                    )).toString()
+                                        val result = if (updatedCount > 0) "success" else "empty"
+                                        val reason = if (updatedCount == 0) "命中 id，但新旧值一致或无可生效改动" else ""
+                                        toolResult = JsonObject(mapOf(
+                                            "result" to JsonPrimitive(result),
+                                            "action" to JsonPrimitive("update"),
+                                            "updatedCount" to JsonPrimitive(updatedCount),
+                                            "reason" to JsonPrimitive(reason)
+                                        )).toString()
+                                    }
                                 }
                             }
                         }
@@ -586,18 +703,20 @@ fun FocusScreen(modifier: Modifier = Modifier) {
                             }
                         }
 
-                        messages = messages + ChatMessage(role = "tool", content = toolResult)
+                        appendMessage(ChatMessage(role = "tool", content = toolResult))
                         executedCount += 1
                     } catch (e: Exception) {
-                        messages = messages + ChatMessage(
-                            role = "tool",
-                            content = JsonObject(
-                                mapOf(
-                                    "result" to JsonPrimitive("fail"),
-                                    "action" to JsonPrimitive("tool_execute"),
-                                    "reason" to JsonPrimitive("工具调用异常：${e.message}")
-                                )
-                            ).toString()
+                        appendMessage(
+                            ChatMessage(
+                                role = "tool",
+                                content = JsonObject(
+                                    mapOf(
+                                        "result" to JsonPrimitive("fail"),
+                                        "action" to JsonPrimitive("tool_execute"),
+                                        "reason" to JsonPrimitive("工具调用异常：${e.message}")
+                                    )
+                                ).toString()
+                            )
                         )
                     }
                 }
@@ -608,7 +727,7 @@ fun FocusScreen(modifier: Modifier = Modifier) {
                 }
 
                 if (autoToolDepth >= maxAutoToolDepth) {
-                    messages = messages + ChatMessage(role = "assistant", content = "工具调用次数已达上限，请确认后继续。")
+                    appendMessage(ChatMessage(role = "assistant", content = "工具调用次数已达上限，请确认后继续。"))
                     autoToolDepth = 0
                     return@launch
                 }
@@ -624,7 +743,7 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             onInputChange = { input = it },
             onSend = {
                 if (input.isNotBlank()) {
-                    messages = messages + ChatMessage(role = "user", content = input)
+                    appendMessage(ChatMessage(role = "user", content = input))
                     autoToolDepth = 0
                     viewModel.chatWithAiStream(buildPrompt(input))
                     input = ""
@@ -636,6 +755,43 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             isLoading = isLoading
         )
     }
+}
+
+private const val CHAT_CACHE_PREF = "focus_chat_cache"
+private const val CHAT_CACHE_KEY = "messages"
+private const val MAX_CACHED_MESSAGES = 100
+
+private fun loadCachedMessages(context: Context): List<ChatMessage> {
+    val raw = context.getSharedPreferences(CHAT_CACHE_PREF, Context.MODE_PRIVATE)
+        .getString(CHAT_CACHE_KEY, null)
+        ?: return emptyList()
+    return runCatching {
+        Json.parseToJsonElement(raw).jsonArray.mapNotNull { element ->
+            val obj = element.jsonObject
+            val role = obj["role"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+            ChatMessage(role = role, content = content)
+        }
+            .takeLast(MAX_CACHED_MESSAGES)
+    }.getOrDefault(emptyList())
+}
+
+private fun saveCachedMessages(context: Context, messages: List<ChatMessage>) {
+    val capped = messages.takeLast(MAX_CACHED_MESSAGES)
+    val encoded = JsonArray(
+        capped.map {
+            JsonObject(
+                mapOf(
+                    "role" to JsonPrimitive(it.role),
+                    "content" to JsonPrimitive(it.content)
+                )
+            )
+        }
+    ).toString()
+    context.getSharedPreferences(CHAT_CACHE_PREF, Context.MODE_PRIVATE)
+        .edit()
+        .putString(CHAT_CACHE_KEY, encoded)
+        .apply()
 }
 
 data class ChatMessage(
@@ -661,6 +817,7 @@ fun ChatBubble(msg: ChatMessage) {
         Box(
             modifier = Modifier
                 .background(bubbleColor, shape = MaterialTheme.shapes.medium)
+                .animateContentSize()
                 .padding(12.dp)
                 .widthIn(max = 320.dp)
         ) {

@@ -11,5 +11,5 @@ val PurpleGrey40 = Color(0xFF625b71)
 val Pink40 = Color(0xFF7D5260)
 
 val DeepBlue = Color(0xFF0D1A4A) // 深蓝
-val LightYellow = Color(0xFFFFF9E3) // 淡黄
+val LightYellow = Color(0xFF42425D) // 淡黄
 val CardWhite = Color(0xFFFFFDF7) // 便签风格暖白

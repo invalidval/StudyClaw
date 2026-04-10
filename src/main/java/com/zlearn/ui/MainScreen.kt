@@ -28,7 +28,7 @@ fun MainScreen() {
     val navController = rememberNavController()
     val items = listOf(
         NavItem("题库", "question_list", Icons.AutoMirrored.Filled.List),
-        NavItem("便携二维码", "review", Icons.Filled.Refresh),
+        NavItem("便携二维码", "qrcode", Icons.Filled.Refresh),
         NavItem("邮享互传", "nfc/receiver", Icons.Filled.Info), // 默认进入接收模式
         NavItem("StudyClaw", "focus", Icons.Filled.Star)
     )
@@ -98,12 +98,20 @@ fun NavGraphWithController(navController: NavHostController, modifier: Modifier 
             val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
             com.zlearn.ui.question.screens.QuestionDetailScreen(id = id, navController = navController)
         }
-        composable("review") { com.zlearn.ui.review.screens.ReviewScreen() }
+        composable("qrcode") { com.zlearn.ui.review.screens.ReviewScreen(navController = navController) }
+        composable("review") { com.zlearn.ui.review.screens.ReviewScreen(navController = navController) } // compatibility route
         composable("nfc") { com.zlearn.ui.nfc.screens.NfcScreen(mode = "receiver") }
         composable("nfc/{mode}") { backStackEntry ->
             val mode = backStackEntry.arguments?.getString("mode") ?: "receiver"
             com.zlearn.ui.nfc.screens.NfcScreen(mode = mode)
         }
         composable("focus") { com.zlearn.ui.focus.screens.FocusScreen() }
+        composable("qrcode/generate/{id}") { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
+            com.zlearn.ui.qrcode.screens.QrGenerateScreen(id = id)
+        }
+        composable("qrcode/scan") {
+            com.zlearn.ui.qrcode.screens.QrScanScreen()
+        }
     }
 }
