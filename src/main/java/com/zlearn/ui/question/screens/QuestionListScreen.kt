@@ -26,8 +26,6 @@ fun QuestionListScreen(
     viewModel: QuestionViewModel = hiltViewModel(),
     navController: NavController
 ) {
-    val questions by viewModel.questions.collectAsState()
-    var summaryLoading by remember { mutableStateOf(false) }
     var newOcrText by remember { mutableStateOf("") }
     var newSubject by remember { mutableStateOf("") }
     var newDifficulty by remember { mutableStateOf(3) }
@@ -48,12 +46,10 @@ fun QuestionListScreen(
                 if (ocrResult != null) {
                     newOcrText = ocrResult
                     // OCR后自动生成summary（独立调用AI）
-                    summaryLoading = true
                     newSummary = ""
                     coroutineScope.launch {
                         val summary = viewModel.generateSummary(ocrResult)
                         newSummary = if (summary.length > 20) summary.take(20) else summary
-                        summaryLoading = false
                     }
                     // 识别成功反馈
                     android.widget.Toast.makeText(context, "识别成功", android.widget.Toast.LENGTH_SHORT).show()
@@ -66,6 +62,21 @@ fun QuestionListScreen(
     var showActionSheet by remember { mutableStateOf(false) }
     var selectedQuestion: QuestionEntity? by remember { mutableStateOf(null) }
     var selectedArchiveType by remember { mutableStateOf<String?>(null) }
+    val questions by viewModel.questions.collectAsState()
+    var summaryLoading by remember { mutableStateOf(false) }
+    // 自动刷新题目列表和归档类型
+    LaunchedEffect(viewModel) {
+        viewModel.loadQuestions()
+        viewModel.loadArchiveTypes()
+    }
+    // 监听筛选归档类型变化，自动刷新filteredQuestions
+    LaunchedEffect(selectedArchiveType) {
+        if (selectedArchiveType != null) {
+            viewModel.filterQuestionsByArchiveType(selectedArchiveType!!)
+        } else {
+            viewModel.loadQuestions()
+        }
+    }
     val archiveTypes by viewModel.archiveTypes.collectAsState()
     val filteredQuestions by viewModel.filteredQuestions.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }

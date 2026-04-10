@@ -29,7 +29,7 @@ fun MainScreen() {
         NavItem("题库", "question_list", Icons.Filled.List),
         NavItem("复习", "review", Icons.Filled.Refresh),
         NavItem("NFC", "nfc", Icons.Filled.Info), // 用 Info 作为 NFC 占位
-        NavItem("专注", "focus", Icons.Filled.Star)
+        NavItem("StudyClaw", "focus", Icons.Filled.Star)
     )
     Scaffold(
         bottomBar = {

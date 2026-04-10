@@ -69,7 +69,7 @@ fun FlowingBorderTextField(
                     .matchParentSize()
                     .clip(RoundedCornerShape(28.dp))
                     .drawBehind {
-                        val strokeWidth = 3.5.dp.toPx() // 原为1.8.dp，改为更宽
+                        val strokeWidth = 4.5.dp.toPx() // 原为1.8.dp，改为更宽
                         val gradient = Brush.linearGradient(
                             colors = flowColors,
                             start = Offset(

@@ -79,6 +79,7 @@ dependencies {
     // DashScope SDK & RxJava3
 //    implementation("com.alibaba.dashscope:dashscope-sdk:2.10.2")
     implementation("io.reactivex.rxjava3:rxjava:3.1.8")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

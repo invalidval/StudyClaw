@@ -46,7 +46,7 @@ fun SplashScreen() {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "喵喵喵~",
+                        text = "StudyClaw",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,

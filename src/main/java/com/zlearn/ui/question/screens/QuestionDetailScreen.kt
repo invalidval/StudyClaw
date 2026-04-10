@@ -79,7 +79,7 @@ fun QuestionDetailScreen(
                         input = ""
                     } else if (input.isNotBlank()) {
                         val prompt = buildString {
-                            append("你现在是答题助手。请结合如下题目信息回答用户问题。\n")
+                            append("你现在是答题助手。请结合如下题目信息回答用户问题。你的回答必须简短，不使用emoji。\n")
                             append("题干：${question.ocrText}\n")
                             append("学科：${question.subject}\n")
                             append("难度：${question.difficulty}\n")
