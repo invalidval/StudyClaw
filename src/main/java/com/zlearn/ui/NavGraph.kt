@@ -9,6 +9,7 @@ import com.zlearn.ui.RegisterScreen
 import com.zlearn.ui.MainScreen
 import com.zlearn.ui.question.screens.QuestionListScreen
 import com.zlearn.ui.question.screens.QuestionDetailScreen
+import com.zlearn.ui.question.screens.AddQuestionScreen
 import com.zlearn.ui.review.screens.ReviewScreen
 import com.zlearn.ui.nfc.screens.NfcScreen
 import com.zlearn.ui.focus.screens.FocusScreen
@@ -50,6 +51,7 @@ fun NavGraph() {
             MainScreen()
         }
         composable("question_list") { QuestionListScreen(navController = navController) }
+        composable("add_question") { AddQuestionScreen(navController = navController) }
         composable("question_detail/{id}") { backStackEntry: NavBackStackEntry ->
             val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
             QuestionDetailScreen(id)

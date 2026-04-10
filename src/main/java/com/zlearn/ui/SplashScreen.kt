@@ -53,11 +53,18 @@ fun SplashScreen() {
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(24.dp))
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+//                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "AI 助力，轻松学习",
                         fontSize = 18.sp,
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(36.dp))
+                    Text(
+                        text = "Created by ZCY & ChatGPT",
+                        fontSize = 16.sp,
                         color = Color.Gray,
                         textAlign = TextAlign.Center
                     )
