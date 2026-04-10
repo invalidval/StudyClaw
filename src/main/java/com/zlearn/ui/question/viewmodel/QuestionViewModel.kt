@@ -115,6 +115,18 @@ class QuestionViewModel @Inject constructor(
         }
     }
 
+    fun unarchiveQuestion(id: Int) {
+        viewModelScope.launch {
+            try {
+                useCases.unarchiveQuestion(id)
+                loadQuestions()
+                loadArchiveTypes()
+            } catch (e: Exception) {
+                _error.value = "取消归档失败: ${e.message}"
+            }
+        }
+    }
+
     fun chatWithAi(message: String) {
         viewModelScope.launch {
             _isLoading.value = true

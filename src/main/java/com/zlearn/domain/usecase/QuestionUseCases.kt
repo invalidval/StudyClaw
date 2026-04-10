@@ -17,6 +17,7 @@ class QuestionUseCases @Inject constructor(
     suspend fun deleteQuestion(question: QuestionEntity) = repository.delete(question)
     suspend fun archiveQuestion(id: Int) = repository.archive(id)
     suspend fun archiveQuestion(id: Int, archiveType: String) = repository.archive(id, archiveType)
+    suspend fun unarchiveQuestion(id: Int) = repository.unarchive(id)
     suspend fun getActiveQuestions() = repository.getActive()
     suspend fun getArchivedQuestions() = repository.getArchived()
     suspend fun getAllArchiveTypes() = repository.getAllArchiveTypes()

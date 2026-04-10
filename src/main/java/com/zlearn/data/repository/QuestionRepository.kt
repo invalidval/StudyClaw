@@ -19,6 +19,7 @@ class QuestionRepository @Inject constructor(
     suspend fun delete(question: QuestionEntity) = questionDao.delete(question)
     suspend fun archive(id: Int) = questionDao.archive(id)
     suspend fun archive(id: Int, archiveType: String) = questionDao.archive(id, archiveType)
+    suspend fun unarchive(id: Int) = questionDao.unarchive(id)
     suspend fun getActive(): List<QuestionEntity> = questionDao.getActive()
     suspend fun getArchived(): List<QuestionEntity> = questionDao.getArchived()
     suspend fun getAllArchiveTypes(): List<String> = questionDao.getAllArchiveTypes()
