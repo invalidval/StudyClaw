@@ -1,13 +1,17 @@
 package com.zlearn.ui.question.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
@@ -18,6 +22,17 @@ import androidx.navigation.NavController
 import com.zlearn.viewmodel.AuthState
 import com.zlearn.viewmodel.UserViewModel
 import kotlin.math.absoluteValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.ui.text.font.FontWeight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,65 +95,125 @@ fun QuestionListScreen(
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { navController.navigate("add_question") }) {
-                Text("+")
+            FloatingActionButton(
+                onClick = { navController.navigate("add_question") },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add")
             }
         }
     ) { innerPadding ->
         Column(modifier = modifier.padding(innerPadding).fillMaxSize()) {
-            // --- 筛选归档类型 ---
-            Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { showFilterMenu = true }) {
-                    Text("筛选归档:")
-                }
-                Button(
-                    onClick = {
-                        if (token.isNullOrBlank()) {
-                            isRegisterMode = false
-                            showLoginDialog = true
-                        } else {
-                            viewModel.syncQuestions(token!!)
+            // --- 顶部控制栏 ---
+            Surface(
+                tonalElevation = 2.dp,
+                shadowElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 筛选按钮
+                    FilterChip(
+                        selected = selectedArchiveType != null,
+                        onClick = { showFilterMenu = true },
+                        label = {
+                            val displayText = when {
+                                selectedArchiveType == null -> "全部归档"
+                                selectedArchiveType == "" -> "未归档"
+                                else -> selectedArchiveType!!
+                            }
+                            Text(text = displayText)
+                        },
+                        leadingIcon = { Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        trailingIcon = {
+                            if (selectedArchiveType != null) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    modifier = Modifier.size(16.dp).clickable { selectedArchiveType = null }
+                                )
+                            }
                         }
-                    },
-                    enabled = !syncing,
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    Text(if (syncing) "同步中..." else "同步")
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                if (!token.isNullOrBlank()) {
-                    TextButton(
-                        onClick = { showLogoutDialog = true },
-                        enabled = !syncing
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // 同步按钮 (IconButton 风格)
+                    FilledTonalIconButton(
+                        onClick = {
+                            if (token.isNullOrBlank()) {
+                                isRegisterMode = false
+                                showLoginDialog = true
+                            } else {
+                                viewModel.syncQuestions(token!!)
+                            }
+                        },
+                        enabled = !syncing,
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        Text("退出登录")
+                        Icon(
+                            Icons.Default.Sync,
+                            contentDescription = "Sync",
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-                }
-                DropdownMenu(
-                    expanded = showFilterMenu,
-                    onDismissRequest = { showFilterMenu = false },
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    DropdownMenuItem(onClick = {
-                        selectedArchiveType = null
-                        showFilterMenu = false
-                    }, text = { Text("全部") })
-                    archiveTypes.forEach { type ->
-                        DropdownMenuItem(onClick = {
-                            selectedArchiveType = type
-                            viewModel.filterQuestionsByArchiveType(type)
-                            showFilterMenu = false
-                        }, text = { Text(type) })
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // 退出登录按钮 (简洁风格)
+                    if (!token.isNullOrBlank()) {
+                        OutlinedButton(
+                            onClick = { showLogoutDialog = true },
+                            border = null,
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("登出", style = MaterialTheme.typography.labelLarge)
+                        }
                     }
-                }
-                if (selectedArchiveType != null) {
-                    Button(onClick = {
-                        selectedArchiveType = null
-                    }, modifier = Modifier.padding(start = 8.dp)) {
-                        Text("清除筛选")
+
+                    // 筛选菜单
+                    DropdownMenu(
+                        expanded = showFilterMenu,
+                        onDismissRequest = { showFilterMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            onClick = {
+                                selectedArchiveType = null
+                                showFilterMenu = false
+                            },
+                            text = { Text("全部") }
+                        )
+                        DropdownMenuItem(
+                            onClick = {
+                                selectedArchiveType = ""
+                                viewModel.filterQuestionsByArchiveType("")
+                                showFilterMenu = false
+                            },
+                            text = { Text("未归档") }
+                        )
+                        archiveTypes.filter { it.isNotBlank() }.forEach { type ->
+                            DropdownMenuItem(
+                                onClick = {
+                                    selectedArchiveType = type
+                                    viewModel.filterQuestionsByArchiveType(type)
+                                    showFilterMenu = false
+                                },
+                                text = { Text(type) }
+                            )
+                        }
                     }
                 }
             }
+
             if (!syncMessage.isNullOrBlank()) {
                 Text(
                     text = syncMessage!!,
@@ -238,6 +313,7 @@ fun QuestionListScreen(
             }
         }
         if (showLoginDialog) {
+            var passwordVisible by remember { mutableStateOf(false) }
             AlertDialog(
                 onDismissRequest = {
                     if (authState !is AuthState.Loading) {
@@ -246,32 +322,12 @@ fun QuestionListScreen(
                         userViewModel.resetAuthState()
                     }
                 },
-                title = { Text(if (isRegisterMode) "注册后同步" else "登录后同步") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = username,
-                            onValueChange = { username = it },
-                            label = { Text("用户名") },
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = password,
-                            onValueChange = { password = it },
-                            label = { Text("密码") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true
-                        )
-                        if (authState is AuthState.Error) {
-                            Text(
-                                text = (authState as AuthState.Error).message,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+                modifier = Modifier
+                    .padding(28.dp)
+                    .fillMaxWidth(),
                 confirmButton = {
-                    TextButton(
+                    Button(
                         onClick = {
                             if (isRegisterMode) {
                                 userViewModel.register(username, password)
@@ -279,15 +335,24 @@ fun QuestionListScreen(
                                 userViewModel.login(username, password)
                             }
                         },
-                        enabled = authState !is AuthState.Loading
+                        enabled = authState !is AuthState.Loading && username.isNotBlank() && password.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        val loadingText = if (isRegisterMode) "注册中..." else "登录中..."
-                        val normalText = if (isRegisterMode) "注册并同步" else "登录并同步"
-                        Text(if (authState is AuthState.Loading) loadingText else normalText)
+                        if (authState is AuthState.Loading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(if (isRegisterMode) "立即注册" else "登录")
+                        }
                     }
                 },
                 dismissButton = {
-                    Row {
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         TextButton(
                             onClick = {
                                 isRegisterMode = !isRegisterMode
@@ -295,17 +360,73 @@ fun QuestionListScreen(
                             },
                             enabled = authState !is AuthState.Loading
                         ) {
-                            Text(if (isRegisterMode) "已有账号？去登录" else "没有账号？去注册")
+                            Text(
+                                if (isRegisterMode) "已有账号？点击登录" else "没有账号？点击注册",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
                         }
-                        TextButton(
-                            onClick = {
-                                showLoginDialog = false
-                                isRegisterMode = false
-                                userViewModel.resetAuthState()
-                            },
-                            enabled = authState !is AuthState.Loading
-                        ) {
-                            Text("取消")
+                    }
+                },
+                title = {
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text(
+                            text = if (isRegisterMode) "创建账号" else "欢迎回来",
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = if (isRegisterMode) "注册以同步您的学习资料" else "请登录以继续同步",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = it },
+                            label = { Text("用户名") },
+                            placeholder = { Text("请输入用户名") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) }
+                        )
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("密码") },
+                            placeholder = { Text("请输入密码") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = null
+                                    )
+                                }
+                            }
+                        )
+                        if (authState is AuthState.Error) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = (authState as AuthState.Error).message,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -401,4 +522,3 @@ private fun archiveTypeColor(archiveType: String, isDarkTheme: Boolean): Color {
     val colors = if (isDarkTheme) darkPalette else lightPalette
     return colors[key.hashCode().absoluteValue % colors.size]
 }
-

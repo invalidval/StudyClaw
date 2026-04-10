@@ -1,40 +1,51 @@
 package com.zlearn.ui
 
-import androidx.compose.material3.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Star
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.NavHostController
-import androidx.compose.runtime.Composable
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.draw.blur
-import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.graphics.Color
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import com.zlearn.utils.NfcUtil
+import kotlin.math.roundToInt
 
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
     val items = listOf(
         NavItem("题库", "question_list", Icons.AutoMirrored.Filled.List),
-        NavItem("便携二维码", "qrcode", Icons.Filled.Refresh),
-        NavItem("邮享互传", "nfc/receiver", Icons.Filled.Info), // 默认进入接收模式
-        NavItem("StudyClaw", "focus", Icons.Filled.Star)
+        NavItem("二维码", "qrcode", Icons.Filled.QrCode),
+        NavItem("互传", "nfc/receiver", Icons.AutoMirrored.Filled.Send),
+        NavItem("AI助理", "focus", Icons.Filled.AutoAwesome)
     )
     Scaffold(
         bottomBar = {
-            BottomNavigationBar(navController, items)
+            ModernBottomNavigationBar(navController, items)
         }
     ) { innerPadding ->
         LaunchedEffect(navController) {
@@ -51,39 +62,108 @@ fun MainScreen() {
 data class NavItem(val label: String, val route: String, val icon: ImageVector)
 
 @Composable
-fun BottomNavigationBar(navController: NavHostController, items: List<NavItem>) {
+fun ModernBottomNavigationBar(navController: NavHostController, items: List<NavItem>) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
-    Box {
-        // 原生毛玻璃模糊层（Android 14+）
-        NavigationBar(
-            modifier = Modifier
-                .matchParentSize()
-                .blur(24.dp), // 移除 renderBehind 参数，保持兼容
-            containerColor = Color.Transparent,
-            tonalElevation = 0.dp
-        ) {}
-        // 前景内容层
-        NavigationBar(
-            modifier = Modifier,
-            containerColor = Color.Transparent,
-            tonalElevation = 0.dp
-        ) {
-            items.forEach { item ->
-                NavigationBarItem(
-                    icon = { Icon(item.icon, contentDescription = item.label) },
-                    label = { Text(item.label) },
-                    selected = currentRoute == item.route || (item.route == "question_list" && currentRoute == null),
-                    onClick = {
-                        if (currentRoute != item.route) {
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.startDestinationId) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+    val currentRoute = navBackStackEntry?.destination?.route ?: "question_list"
+
+    val selectedIndex = items.indexOfFirst { item ->
+        val route = item.route
+        currentRoute == route ||
+        (route.contains("/") && currentRoute.startsWith(route.substringBefore("/")))
+    }.let { if (it == -1) 0 else it }
+
+    // 用于动画层的位置和大小
+    var itemWidth by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 20.dp)
+            .height(64.dp)
+            .shadow(12.dp, RoundedCornerShape(32.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(32.dp))
+            .onGloballyPositioned {
+                itemWidth = it.size.width.toFloat() / items.size
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        // 滑动选中背景
+        val offsetX by animateFloatAsState(
+            targetValue = selectedIndex * itemWidth,
+            animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = 0.75f),
+            label = "nav_offset"
+        )
+
+        val indicatorWidth = with(density) { itemWidth.toDp() }
+        if (itemWidth > 0) {
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(offsetX.roundToInt(), 0) }
+                    .width(indicatorWidth)
+                    .fillMaxHeight()
+                    .padding(6.dp)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                            )
+                        ),
+                        RoundedCornerShape(28.dp)
+                    )
+            )
+        }
+
+        // 按钮行
+        Row(modifier = Modifier.fillMaxSize()) {
+            items.forEachIndexed { index, item ->
+                val isSelected = selectedIndex == index
+                val contentColor by animateColorAsState(
+                    targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "content_color"
+                )
+                val iconScale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.2f else 1.0f,
+                    label = "icon_scale"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .clickable {
+                            if (currentRoute != item.route) {
+                                navController.navigate(item.route) {
+                                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
                             }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = item.label,
+                            tint = contentColor,
+                            modifier = Modifier.size(if (isSelected) 24.dp else 22.dp).graphicsLayer(scaleX = iconScale, scaleY = iconScale)
+                        )
+                        if (isSelected) {
+                            Text(
+                                text = item.label,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = contentColor,
+                                maxLines = 1
+                            )
                         }
                     }
-                )
+                }
             }
         }
     }

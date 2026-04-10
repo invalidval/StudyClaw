@@ -13,28 +13,65 @@ android {
     namespace = "com.zlearn"
     compileSdk = 36
 
+    signingConfigs {
+        create("release") {
+            // 请手动将你的 jks 文件放入 app 目录下，并修改下面的文件名
+            storeFile = file("sc.jks")
+            storePassword = System.getenv("SIGNING_STORE_PASSWORD") ?: "20050530"
+            keyAlias = System.getenv("SIGNING_KEY_ALIAS") ?: "key1"
+            keyPassword = System.getenv("SIGNING_KEY_PASSWORD") ?: "20050530"
+
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
+    }
+
     defaultConfig {
-        applicationId = "com.zlearn.v4"
+        applicationId = "com.zlearn.v5"
         minSdk = 24
         targetSdk = 36
         versionCode = 2
-        versionName = "1.4"
+        versionName = "1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 默认开发环境配置
+        buildConfigField("String", "BASE_URL", "\"http://10.129.94.211:8080/\"")
+        buildConfigField("String", "ALIYUN_API_KEY", "\"sk-cec6e41f863145f895f0d9c563b08ffe\"")
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
+
+            // 发行环境配置（可以在这里覆盖默认值）
+            buildConfigField("String", "BASE_URL", "\"https://api.yourdomain.com/\"")
+            buildConfigField("String", "ALIYUN_API_KEY", "\"${System.getenv("ALIYUN_API_KEY") ?: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}\"")
+
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+
+        debug {
+            // 开发工具使用的配置
+            buildConfigField("String", "BASE_URL", "\"http://10.129.94.211:8080/\"")
+        }
+    }
+
+    composeCompiler {
+        reportsDestination = layout.buildDirectory.dir("compose_compiler")
+        metricsDestination = layout.buildDirectory.dir("compose_compiler")
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true // 显式开启 BuildConfig 功能
     }
 
     compileOptions {

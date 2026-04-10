@@ -16,7 +16,7 @@ class MyApplication : Application() {
     private val client = OkHttpClient()
 
     // 手动设置应用模式：DEV（开发）、PRE（预发布）、REL（发布）
-    val appMode = AppMode.DEV  // 更改此值以切换模式
+    val appMode = AppMode.PRE  // 更改此值以切换模式
 
     override fun onCreate() {
         super.onCreate()
@@ -32,7 +32,7 @@ class MyApplication : Application() {
             while (isActive) {
                 try {
                     val request = Request.Builder()
-                        .url("http://10.129.94.211:8080/api/heartbeat")
+                        .url("${BuildConfig.BASE_URL}api/heartbeat")
                         .build()
                     val response = client.newCall(request).execute()
                     if (!response.isSuccessful) {
@@ -50,7 +50,7 @@ class MyApplication : Application() {
     private suspend fun checkIpAllowed(): Boolean {
         return try {
             val request = Request.Builder()
-                .url("http://10.129.94.211:8080/api/check_ip")
+                .url("${BuildConfig.BASE_URL}api/check_ip")
                 .build()
             val response = withContext(Dispatchers.IO) {
                 client.newCall(request).execute()

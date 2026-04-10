@@ -1,5 +1,6 @@
 package com.zlearn.di
 
+import com.zlearn.BuildConfig
 import com.zlearn.data.remote.ApiService
 import com.zlearn.network.AiApiService
 import dagger.Module
@@ -23,7 +24,7 @@ object NetworkModule {
     @Singleton
     fun provideRetrofit(client: OkHttpClient): Retrofit =
         Retrofit.Builder()
-            .baseUrl("http://10.129.94.211:8080/") // TODO: 替换为实际后端地址和端口
+            .baseUrl(BuildConfig.BASE_URL)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
@@ -36,7 +37,7 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideAiApiService(): AiApiService {
-        val aliyunApiKey = "sk-cec6e41f863145f895f0d9c563b08ffe" // TODO: 替换为你的阿里云API-KEY
+        val aliyunApiKey = BuildConfig.ALIYUN_API_KEY
         val aliyunClient = OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
