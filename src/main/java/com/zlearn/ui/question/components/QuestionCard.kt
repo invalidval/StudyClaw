@@ -1,5 +1,6 @@
 package com.zlearn.ui.question.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.CardDefaults
@@ -12,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import com.mikepenz.markdown.m3.Markdown
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuestionCard(
     summary: String,

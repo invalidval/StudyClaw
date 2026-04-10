@@ -11,17 +11,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
 import com.zlearn.data.database.QuestionEntity
+import com.zlearn.domain.model.ShareItem
+import com.zlearn.domain.model.SharePayload
 import com.zlearn.ui.components.AiInputBar  // 导入封装组件
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
+import com.zlearn.utils.BleShareTransport
+import com.zlearn.utils.NfcShareCodec
+import com.zlearn.utils.NfcUtil
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
+import java.util.UUID
 
 @Composable
 fun QuestionDetailScreen(
     id: Int,
+    navController: NavController? = null,
     modifier: Modifier = Modifier,
     viewModel: QuestionViewModel = hiltViewModel()
 ) {
@@ -33,6 +43,7 @@ fun QuestionDetailScreen(
     var input by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val context = LocalContext.current
 
     if (question == null) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -46,6 +57,40 @@ fun QuestionDetailScreen(
         Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
             // 题目卡片（保持原有代码）
             QuestionCard(question = question)
+
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
+                Button(onClick = {
+                    val sessionId = UUID.randomUUID().toString()
+                    NfcUtil.setOutgoingPayload(sessionId)
+                    val hashInput = "${question.ocrText}|${question.summary}|${question.subject}"
+                    val hash = MessageDigest.getInstance("SHA-256")
+                        .digest(hashInput.toByteArray())
+                        .joinToString("") { "%02x".format(it) }
+                    val payload = SharePayload(
+                        sessionId = sessionId,
+                        senderDevice = android.os.Build.MODEL ?: "android",
+                        createdAt = System.currentTimeMillis(),
+                        items = listOf(
+                            ShareItem(
+                                contentHash = hash,
+                                ocrText = question.ocrText,
+                                summary = question.summary,
+                                subject = question.subject,
+                                difficulty = question.difficulty,
+                                aiAnalysis = question.aiAnalysis,
+                                isArchived = question.isArchived,
+                                archiveType = question.archiveType ?: ""
+                            )
+                        )
+                    )
+                    val encoded = NfcShareCodec.encode(payload)
+                    BleShareTransport.startAdvertising(context, encoded)
+                    android.widget.Toast.makeText(context, "已准备分享，请让接收方打开NFC页后轻触", android.widget.Toast.LENGTH_SHORT).show()
+                    navController?.navigate("nfc/sender")
+                }) {
+                    Text("NFC分享")
+                }
+            }
 
             // AI 回复内容
             if (aiStreamResponse.isNotBlank()) {

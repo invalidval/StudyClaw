@@ -2,9 +2,10 @@ package com.zlearn.ui
 
 import androidx.compose.material3.*
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Star
@@ -17,18 +18,18 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.Color
+import com.zlearn.utils.NfcUtil
 
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
     val items = listOf(
-        NavItem("题库", "question_list", Icons.Filled.List),
+        NavItem("题库", "question_list", Icons.AutoMirrored.Filled.List),
         NavItem("复习", "review", Icons.Filled.Refresh),
-        NavItem("NFC", "nfc", Icons.Filled.Info), // 用 Info 作为 NFC 占位
+        NavItem("NFC", "nfc/receiver", Icons.Filled.Info), // 默认进入接收模式
         NavItem("StudyClaw", "focus", Icons.Filled.Star)
     )
     Scaffold(
@@ -36,6 +37,13 @@ fun MainScreen() {
             BottomNavigationBar(navController, items)
         }
     ) { innerPadding ->
+        LaunchedEffect(navController) {
+            NfcUtil.incomingPayload.collect {
+                navController.navigate("nfc/receiver") {
+                    launchSingleTop = true
+                }
+            }
+        }
         NavGraphWithController(navController, Modifier.padding(innerPadding))
     }
 }
@@ -88,10 +96,14 @@ fun NavGraphWithController(navController: NavHostController, modifier: Modifier 
         composable("add_question") { com.zlearn.ui.question.screens.AddQuestionScreen(navController = navController) }
         composable("question_detail/{id}") { backStackEntry ->
             val id = backStackEntry.arguments?.getString("id")?.toIntOrNull() ?: -1
-            com.zlearn.ui.question.screens.QuestionDetailScreen(id)
+            com.zlearn.ui.question.screens.QuestionDetailScreen(id = id, navController = navController)
         }
         composable("review") { com.zlearn.ui.review.screens.ReviewScreen() }
-        composable("nfc") { com.zlearn.ui.nfc.screens.NfcScreen() }
+        composable("nfc") { com.zlearn.ui.nfc.screens.NfcScreen(mode = "receiver") }
+        composable("nfc/{mode}") { backStackEntry ->
+            val mode = backStackEntry.arguments?.getString("mode") ?: "receiver"
+            com.zlearn.ui.nfc.screens.NfcScreen(mode = mode)
+        }
         composable("focus") { com.zlearn.ui.focus.screens.FocusScreen() }
     }
 }
