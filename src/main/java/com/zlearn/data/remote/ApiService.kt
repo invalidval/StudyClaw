@@ -28,13 +28,28 @@ data class SyncQuestionDto(
 )
 
 data class SyncQuestionsRequest(
-    val questions: List<SyncQuestionDto>
+    val questions: List<SyncQuestionDto>,
+    val cursorUpdatedAt: Long = 0L,
+    val cursorId: Int = 0,
+    val limit: Int = 200
+)
+
+data class SyncStats(
+    val updatedCount: Int? = null
+)
+
+data class SyncCursor(
+    val updatedAt: Long = 0L,
+    val id: Int = 0,
+    val hasMore: Boolean = false
 )
 
 data class SyncQuestionsResponse(
     val success: Boolean,
     val questions: List<SyncQuestionDto> = emptyList(),
-    val message: String? = null
+    val message: String? = null,
+    val stats: SyncStats? = null,
+    val cursor: SyncCursor? = null
 )
 
 data class QuestionDetailResponse(

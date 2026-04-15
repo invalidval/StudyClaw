@@ -1,11 +1,19 @@
 package com.zlearn.data.database
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "questions")
+@Entity(
+    tableName = "questions",
+    indices = [
+        Index(value = ["ownerUserId"]),
+        Index(value = ["ownerUserId", "cloudId"], unique = true)
+    ]
+)
 data class QuestionEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val ownerUserId: Int = 0,
     val cloudId: Int? = null,
     val imagePath: String,
     val ocrText: String,

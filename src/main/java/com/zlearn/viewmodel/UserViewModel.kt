@@ -37,7 +37,7 @@ class UserViewModel @Inject constructor(
             }
             val response = userRepository.register(username, hashPassword(password))
             if (response?.success == true && !response.token.isNullOrBlank()) {
-                authSessionStore.saveToken(response.token)
+                authSessionStore.saveSession(response.token, response.user_id)
                 _authState.value = AuthState.Success(token = response.token)
             } else {
                 _authState.value = AuthState.Error(response?.message ?: "注册失败")
@@ -54,7 +54,7 @@ class UserViewModel @Inject constructor(
             }
             val response = userRepository.login(username, hashPassword(password))
             if (response?.success == true && !response.token.isNullOrBlank()) {
-                authSessionStore.saveToken(response.token)
+                authSessionStore.saveSession(response.token, response.user_id)
                 _authState.value = AuthState.Success(token = response.token)
             } else {
                 _authState.value = AuthState.Error(response?.message ?: "登录失败")

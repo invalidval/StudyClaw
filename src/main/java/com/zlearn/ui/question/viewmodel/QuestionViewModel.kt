@@ -2,6 +2,7 @@ package com.zlearn.ui.question.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.zlearn.data.local.AuthSessionStore
 import com.zlearn.domain.usecase.QuestionUseCases
 import com.zlearn.data.database.QuestionEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,7 +22,8 @@ import org.json.JSONException
 
 @HiltViewModel
 class QuestionViewModel @Inject constructor(
-    private val useCases: QuestionUseCases
+    private val useCases: QuestionUseCases,
+    private val authSessionStore: AuthSessionStore
 ) : ViewModel() {
 
     private val disposables = CompositeDisposable()
@@ -67,6 +69,21 @@ class QuestionViewModel @Inject constructor(
     init {
         loadQuestions()
         loadArchiveTypes() // 初始化时加载归档类型
+        observeAccountSwitch()
+    }
+
+    private fun observeAccountSwitch() {
+        viewModelScope.launch {
+            authSessionStore.userId
+                .collect {
+                    // 切换账号后刷新并清理临时状态，避免串号数据残留在界面。
+                    loadQuestions()
+                    loadArchiveTypes()
+                    _filteredQuestions.value = emptyList()
+                    _remoteQuestion.value = null
+                    _syncMessage.value = null
+                }
+        }
     }
 
     fun loadQuestions() {
