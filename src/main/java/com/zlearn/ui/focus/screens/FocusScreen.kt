@@ -23,6 +23,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.mikepenz.markdown.m3.Markdown
 import com.zlearn.data.database.QuestionEntity
 import com.zlearn.ui.question.viewmodel.QuestionViewModel
 import com.zlearn.ui.components.AiInputBar
@@ -70,13 +71,32 @@ fun FocusScreen(modifier: Modifier = Modifier) {
     var input by remember { mutableStateOf("") }
     var autoToolDepth by remember { mutableStateOf(0) }
     var smoothStreamResponse by remember { mutableStateOf("") }
-            fun appendMessage(message: ChatMessage) {
-                messages = (messages + message).takeLast(MAX_CACHED_MESSAGES)
-            }
+    fun appendMessage(message: ChatMessage) {
+        messages = (messages + message).takeLast(MAX_CACHED_MESSAGES)
+    }
 
     val listState = rememberLazyListState()
+    var autoScrollEnabled by remember { mutableStateOf(true) }
+    val isNearBottom by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val total = layoutInfo.totalItemsCount
+            if (total == 0) {
+                true
+            } else {
+                val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                // Keep a 1-item buffer to avoid flicker around the bottom edge.
+                lastVisible >= total - 2
+            }
+        }
+    }
     val maxAutoToolDepth = 5
     val maxHistoryRounds = 10
+
+    fun currentLastListIndex(): Int {
+        val hasStreamingBubble = isLoading && smoothStreamResponse.isNotBlank()
+        return messages.lastIndex + if (hasStreamingBubble) 1 else 0
+    }
 
     fun extractIds(toolCall: JsonObject): List<Int> {
         val ids = toolCall["ids"]?.jsonArray
@@ -349,23 +369,47 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(16.dp)
         )
         HorizontalDivider()
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(8.dp),
-            state = listState
-        ) {
-            if (messages.isEmpty() && !isLoading) {
-                item {
-                    val scope = this
-                    scope.EmptyStateHint()
-                }
-            } else {
-                items(messages) { msg ->
-                    ChatBubble(msg)
-                }
-                if (isLoading && smoothStreamResponse.isNotBlank()) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(8.dp),
+                state = listState
+            ) {
+                if (messages.isEmpty() && !isLoading) {
                     item {
-                        ChatBubble(ChatMessage(role = "assistant", content = smoothStreamResponse))
+                        val scope = this
+                        scope.EmptyStateHint()
                     }
+                } else {
+                    items(messages) { msg ->
+                        ChatBubble(msg)
+                    }
+                    if (isLoading && smoothStreamResponse.isNotBlank()) {
+                        item {
+                            ChatBubble(ChatMessage(role = "assistant", content = smoothStreamResponse))
+                        }
+                    }
+                }
+            }
+
+            if (!isNearBottom && currentLastListIndex() >= 0) {
+                FloatingActionButton(
+                    onClick = {
+                        scope.launch {
+                            autoScrollEnabled = true
+                            val lastIndex = currentLastListIndex()
+                            if (lastIndex >= 0) {
+                                listState.animateScrollToItem(lastIndex)
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "回到底部"
+                    )
                 }
             }
         }
@@ -396,9 +440,18 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        LaunchedEffect(messages.size, smoothStreamResponse.length, isLoading) {
+        LaunchedEffect(isNearBottom, listState.isScrollInProgress) {
+            if (isNearBottom) {
+                autoScrollEnabled = true
+            } else if (listState.isScrollInProgress) {
+                autoScrollEnabled = false
+            }
+        }
+
+        LaunchedEffect(messages.size, isLoading, autoScrollEnabled, isNearBottom) {
+            if (!autoScrollEnabled && !isNearBottom) return@LaunchedEffect
             val hasStreamingBubble = isLoading && smoothStreamResponse.isNotBlank()
-            val lastIndex = messages.lastIndex + if (hasStreamingBubble) 1 else 0
+            val lastIndex = currentLastListIndex()
             if (lastIndex < 0) return@LaunchedEffect
             if (hasStreamingBubble) {
                 listState.scrollToItem(lastIndex)
@@ -415,6 +468,8 @@ fun FocusScreen(modifier: Modifier = Modifier) {
             if (aiStreamResponse.isBlank() || isLoading) return@LaunchedEffect
 
             val trimmed = aiStreamResponse.trim()
+            // Treat completed stream content as a one-shot event to avoid replay on screen re-entry.
+            viewModel.clearAiStreamResponse()
             val toolJsonBlocks = extractToolJsonBlocksFromResponse(trimmed)
             if (toolJsonBlocks.isEmpty()) {
                 val hasToolMarker = trimmed.contains("#TOOL#")
@@ -760,11 +815,9 @@ fun FocusScreen(modifier: Modifier = Modifier) {
                 if (input.isNotBlank()) {
                     appendMessage(ChatMessage(role = "user", content = input))
                     autoToolDepth = 0
+                    autoScrollEnabled = true
                     viewModel.chatWithAiStream(buildPrompt(input))
                     input = ""
-                    scope.launch {
-                        listState.animateScrollToItem((messages.size - 1).coerceAtLeast(0))
-                    }
                 }
             },
             isLoading = isLoading
@@ -836,13 +889,33 @@ fun ChatBubble(msg: ChatMessage) {
                 .padding(12.dp)
                 .widthIn(max = 320.dp)
         ) {
-            Text(
-                text = if (isTool) formatToolStatus(msg.content) else msg.content,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.Black
-            )
+            val content = if (isTool) formatToolStatus(msg.content) else msg.content
+            if (isUser || containsFormulaSyntax(content)) {
+                Text(
+                    text = content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Black
+                )
+            } else {
+                Markdown(content = content, modifier = Modifier.fillMaxWidth())
+            }
         }
     }
+}
+
+private fun containsFormulaSyntax(text: String): Boolean {
+    if (text.isBlank()) return false
+    return text.contains("$$") ||
+        text.contains(Regex("""\$[^$\n]+\$""")) ||
+        text.contains("\\(") ||
+        text.contains("\\[") ||
+        text.contains("\\frac") ||
+        text.contains("\\sqrt") ||
+        text.contains("\\sum") ||
+        text.contains("\\int") ||
+        text.contains("\\alpha") ||
+        text.contains("\\beta") ||
+        text.contains("\\gamma")
 }
 
 private fun formatToolStatus(raw: String): String {
