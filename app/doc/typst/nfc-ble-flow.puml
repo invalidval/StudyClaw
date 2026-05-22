@@ -1,0 +1,93 @@
+@startuml nfc-ble-flow
+' NFC + BLE P2P 分享交互时序图
+' 导出: plantuml -tpng -scale 2 nfc-ble-flow.puml
+
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName SimSun
+skinparam defaultFontSize 12
+skinparam sequenceArrowThickness 2.5
+skinparam roundcorner 12
+skinparam maxmessagesize 220
+skinparam boxPadding 16
+skinparam participantPadding 60
+skinparam sequenceMessageAlign center
+
+' 参与者配色
+skinparam actor {
+  BackgroundColor #DBEAFE
+  BorderColor #3B82F6
+  FontColor #1E3A5F
+  FontStyle bold
+}
+
+skinparam participant {
+  BackgroundColor #F3E8FF
+  BorderColor #9333EA
+  FontColor #4C1D95
+  FontStyle bold
+}
+
+skinparam note {
+  BackgroundColor #FFFBEB
+  BorderColor #F59E0B
+  FontColor #78350F
+  FontSize 11
+}
+
+' 自定义样式
+<style>
+  participant {
+    FontSize 13
+  }
+  actor {
+    FontSize 13
+  }
+</style>
+
+title **NFC + BLE 碰一碰分享 — 完整交互流程**
+footer 智能错题本 · NFC + BLE P2P 分享
+
+actor "**发送端**\n(Sender)" as S  #DBEAFE
+participant "NFC Tag" as N  #F3E8FF
+actor "**接收端**\n(Receiver)" as R  #DBEAFE
+
+|||
+hnote over S #EBF5FF: **阶段一: 发送端准备数据**
+|||
+
+S -> S: **1. 组装 SharePayload**\nNfcShareCodec.encode()
+S -> S: **2. BLE 广播启动**\nBleShareTransport.startAdvertising(data)
+
+hnote over S #FEF3C7: GATT Server 已就绪
+note over S #FFF7ED: Read Characteristic · payload\ndata\nWrite Characteristic · ACK
+
+|||
+hnote over R #EBF5FF: **阶段二: NFC 感应唤醒**
+|||
+
+R -> N: **NFC 碰触**
+activate N
+N -> R: 3. extractNfcTextPayload()
+deactivate N
+
+R -> R: **4. BLE 扫描启动**\npublishIncomingPayload() →\nBleShareTransport.startScanning()
+
+|||
+hnote over S,R #EBF5FF: **阶段三: BLE 连接与数据传输**
+|||
+
+R -> S: **5. 连接 & 服务发现**\nconnectGatt() → discoverServices()
+S --> R: **返回 payload data**\nreadCharacteristic()
+
+R -> R: **6. 解析 & 入库**\nNfcShareCodec.decode(data)\n↓\ninsert QuestionEntity(s)
+
+|||
+hnote over S,R #EBF5FF: **阶段四: ACK 确认**
+|||
+
+R -> S: **7. 发送 ACK**\nwriteCharacteristic(ACK, sessionId)
+activate S #E0F2FE
+S -> S: **8. 确认收到**\nonAckReceived()\n状态 → Completed
+deactivate S
+
+@enduml

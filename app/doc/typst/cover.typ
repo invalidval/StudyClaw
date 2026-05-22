@@ -22,17 +22,11 @@
       [
       #text(font: ("Calibri", "SimSun"), weight: "bold", size: 24pt)[题目:]
       ],
-
-      [#box(width: 500pt)[
-        
-        #line(length: 360pt)
-        #v(-2em)  // 调整文字位置
-        #place(
-          dx: 6em ,
-          dy: 0em,
-          text(font: ("Calibri", "SimSun"),weight: "bold", size: 24pt)[#lab]
-        ) 
-      ]
+      [
+        #underline(
+          offset: 3pt,
+          text(font: ("Calibri", "SimSun"), weight: "bold", size: 24pt)[#lab]
+        )
       ]
     )
 

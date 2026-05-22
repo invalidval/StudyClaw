@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" version="21.0.0">
+  <diagram id="nfc-modes" name="NFC两种交互模式">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="NFC 两种交互模式对比" style="text;html=1;fontSize=16;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="200" y="10" width="400" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Decision -->
+        <mxCell id="decision" value="应用在前台?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="60" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ===== LEFT: Reader Mode ===== -->
+        <mxCell id="reader-lane" value="读取器模式 (Reader Mode)  — 前台" style="swimlane;startSize=28;fillColor=#DAE8FC;strokeColor=#3B82F6;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="180" width="350" height="320" as="geometry" />
+        </mxCell>
+
+        <mxCell id="r1" value="MainActivity.enableReaderMode()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;fontSize=11;" vertex="1" parent="reader-lane">
+          <mxGeometry x="50" y="45" width="250" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="r2" value="readerFlags = NFC_A | NFC_B | NFC_F | NFC_V | BARCODE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;fontSize=11;" vertex="1" parent="reader-lane">
+          <mxGeometry x="30" y="100" width="290" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="r3" value="onTagDiscovered(tag)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;fontSize=11;" vertex="1" parent="reader-lane">
+          <mxGeometry x="50" y="160" width="250" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="r4" value="extractPayloadFromTag(tag)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#3B82F6;fontSize=11;" vertex="1" parent="reader-lane">
+          <mxGeometry x="35" y="220" width="280" height="36" as="geometry" />
+        </mxCell>
+
+        <!-- Reader edges -->
+        <mxCell id="er1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#3B82F6;" edge="1" parent="1" source="r1" target="r2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="er2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#3B82F6;" edge="1" parent="1" source="r2" target="r3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="er3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#3B82F6;" edge="1" parent="1" source="r3" target="r4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Edge: Decision -> Reader -->
+        <mxCell id="ed-r" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;fontSize=12;fontStyle=1;exitX=0;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="decision" target="reader-lane">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="195" y="100" />
+              <mxPoint x="195" y="150" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===== RIGHT: Intent Dispatch ===== -->
+        <mxCell id="intent-lane" value="Intent 分发模式  — 后台" style="swimlane;startSize=28;fillColor=#F3E8FF;strokeColor=#9333EA;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="180" width="370" height="320" as="geometry" />
+        </mxCell>
+
+        <mxCell id="i1" value="ACTION_NDEF_DISCOVERED Intent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9333EA;fontSize=11;" vertex="1" parent="intent-lane">
+          <mxGeometry x="40" y="45" width="290" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="i2" value="MIME: application/vnd.com.zlearn.wrongbook-share" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9333EA;fontSize=10;" vertex="1" parent="intent-lane">
+          <mxGeometry x="25" y="100" width="320" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="i3" value="MainActivity.onNewIntent(intent)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9333EA;fontSize=11;" vertex="1" parent="intent-lane">
+          <mxGeometry x="40" y="160" width="290" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="i4" value="handleNfcIntent() → extractNfcTextPayload(intent)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9333EA;fontSize=10;" vertex="1" parent="intent-lane">
+          <mxGeometry x="15" y="220" width="340" height="36" as="geometry" />
+        </mxCell>
+
+        <!-- Intent edges -->
+        <mxCell id="ei1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#9333EA;" edge="1" parent="1" source="i1" target="i2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ei2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#9333EA;" edge="1" parent="1" source="i2" target="i3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ei3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#9333EA;" edge="1" parent="1" source="i3" target="i4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Edge: Decision -> Intent -->
+        <mxCell id="ed-i" value="no" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;fontSize=12;fontStyle=1;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="decision" target="intent-lane">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="615" y="100" />
+              <mxPoint x="615" y="150" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Converge -->
+        <mxCell id="converge" value="decodeRecordToText() → NDEF RTD_TEXT 解析" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="220" y="530" width="370" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ec1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#82B366;" edge="1" parent="1" source="reader-lane" target="converge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="195" y="515" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ec2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#82B366;" edge="1" parent="1" source="intent-lane" target="converge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="615" y="515" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Final output -->
+        <mxCell id="output" value="publishIncomingPayload() → NfcViewModel 接收" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="230" y="600" width="350" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ef1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=classic;strokeWidth=2;strokeColor=#B85450;" edge="1" parent="1" source="converge" target="output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -28,6 +28,7 @@ import com.zlearn.utils.BleShareTransport
 import com.zlearn.utils.NfcShareCodec
 import com.zlearn.utils.NfcUtil
 import com.zlearn.utils.PermissionUtil
+import com.zlearn.utils.ShareHceService
 import com.mikepenz.markdown.m3.Markdown
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
@@ -53,6 +54,8 @@ fun QuestionDetailScreen(
     val uiHandler = remember { Handler(Looper.getMainLooper()) }
     val requiredBlePermissions = remember { PermissionUtil.requiredBlePermissions() }
     var pendingShareStart by remember { mutableStateOf(false) }
+    var pendingUseHce by remember { mutableStateOf(true) }
+    var showShareModeDialog by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -65,12 +68,7 @@ fun QuestionDetailScreen(
         if (pendingShareStart) {
             pendingShareStart = false
             question?.let {
-                startShare(
-                    question = it,
-                    context = context,
-                    navController = navController,
-                    uiHandler = uiHandler
-                )
+                startShare(question = it, context = context, navController = navController, uiHandler = uiHandler, useHce = pendingUseHce)
             }
         }
     }
@@ -89,20 +87,8 @@ fun QuestionDetailScreen(
             QuestionCard(question = question)
 
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
-                Button(onClick = {
-                    if (!PermissionUtil.hasBlePermissions(context)) {
-                        pendingShareStart = true
-                        permissionLauncher.launch(requiredBlePermissions)
-                    } else {
-                        startShare(
-                            question = question,
-                            context = context,
-                            navController = navController,
-                            uiHandler = uiHandler
-                        )
-                    }
-                }) {
-                    Text("NFC分享")
+                Button(onClick = { showShareModeDialog = true }) {
+                    Text("分享")
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Button(onClick = {
@@ -165,6 +151,33 @@ fun QuestionDetailScreen(
                 buttonText = "发送"
             )
         }
+
+        // ── 分享模式选择对话框 ──
+        if (showShareModeDialog) {
+            AlertDialog(
+                onDismissRequest = { showShareModeDialog = false },
+                title = { Text("选择分享方式") },
+                text = { Text("NFC 碰触：对方靠近你即可发现\n广播模式：对方通过 BLE 扫描发现你") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showShareModeDialog = false
+                        if (!PermissionUtil.hasBlePermissions(context)) {
+                            pendingUseHce = true; pendingShareStart = true
+                            permissionLauncher.launch(requiredBlePermissions)
+                        } else question?.let { startShare(it, context, navController, uiHandler, useHce = true) }
+                    }) { Text("NFC 碰触") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showShareModeDialog = false
+                        if (!PermissionUtil.hasBlePermissions(context)) {
+                            pendingUseHce = false; pendingShareStart = true
+                            permissionLauncher.launch(requiredBlePermissions)
+                        } else question?.let { startShare(it, context, navController, uiHandler, useHce = false) }
+                    }) { Text("广播模式") }
+                }
+            )
+        }
     }
 }
 
@@ -172,7 +185,8 @@ private fun startShare(
     question: QuestionEntity,
     context: android.content.Context,
     navController: NavController?,
-    uiHandler: Handler
+    uiHandler: Handler,
+    useHce: Boolean
 ) {
     val sessionId = UUID.randomUUID().toString()
     val hashInput = "${question.ocrText}|${question.summary}|${question.subject}"
@@ -198,26 +212,27 @@ private fun startShare(
     )
     val encoded = NfcShareCodec.encode(payload)
 
-    BleShareTransport.startAdvertising(context, encoded) { result ->
+    BleShareTransport.startAdvertising(context, encoded, sessionId, includeSessionInScan = !useHce) { result ->
         uiHandler.post {
             when (result) {
                 BleShareTransport.AdvertiseStartResult.Started -> {
-                    // Register ACK listener after advertising starts. startAdvertising() calls
-                    // stopAdvertising() internally, which clears previous listeners.
+                    if (useHce) ShareHceService.setSessionData(sessionId)
                     BleShareTransport.setOnAckReceivedListener { ackSessionId ->
                         if (ackSessionId == sessionId) {
                             uiHandler.post {
                                 NfcUtil.setSenderShareState(NfcUtil.SenderShareState.Completed("对方已收到并导入"))
                                 NfcUtil.setOutgoingPayload(null)
                                 BleShareTransport.stopAdvertising()
+                                ShareHceService.clearSessionData()
                                 android.widget.Toast.makeText(context, "对方已收到并导入", android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
                     NfcUtil.setSenderShareState(NfcUtil.SenderShareState.WaitingAck(sessionId))
                     NfcUtil.setOutgoingPayload(sessionId)
-                    android.widget.Toast.makeText(context, "已开始发送，等待对方确认", android.widget.Toast.LENGTH_SHORT).show()
-                    navController?.navigate("nfc/sender")
+                    val toast = if (useHce) "已开始 NFC 分享，等待对方靠近" else "已开始广播分享，等待对方连接"
+                    android.widget.Toast.makeText(context, toast, android.widget.Toast.LENGTH_SHORT).show()
+                    navController?.navigate("nfc/sender-${if (useHce) "nfc" else "broadcast"}")
                 }
 
                 BleShareTransport.AdvertiseStartResult.NotInitialized -> {
@@ -233,9 +248,10 @@ private fun startShare(
                 }
 
                 BleShareTransport.AdvertiseStartResult.MissingPermission -> {
-                    NfcUtil.setSenderShareState(NfcUtil.SenderShareState.Error("缺少 BLE 权限，请先授权"))
+                    NfcUtil.setSenderShareState(NfcUtil.SenderShareState.Error("缺少 BLE 权限，请在系统设置中授权" +
+                            "\n需要：附近设备 / 蓝牙广播 / 蓝牙连接"))
                     BleShareTransport.setOnAckReceivedListener(null)
-                    android.widget.Toast.makeText(context, "缺少 BLE 权限，请先授权", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, "缺少蓝牙权限，请在系统设置 → 应用管理 → StudyClaw → 权限 中开启", android.widget.Toast.LENGTH_LONG).show()
                 }
 
                 BleShareTransport.AdvertiseStartResult.AdvertiserUnavailable -> {

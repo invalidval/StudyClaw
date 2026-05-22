@@ -1,0 +1,62 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" version="29.0.3">
+  <diagram id="ndef-frame" name="NDEF RTD_TEXT帧结构">
+    <mxGraphModel dx="1018" dy="712" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="NDEF RTD_TEXT 记录帧结构" style="text;html=1;fontSize=16;fontStyle=1;align=center;" parent="1" vertex="1">
+          <mxGeometry x="200" y="20" width="400" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="byte0-label" value="字节 0" style="text;html=1;fontSize=11;fontStyle=1;align=center;" parent="1" vertex="1">
+          <mxGeometry x="20" y="70" width="60" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="byte0-box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="20" y="90" width="780" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="bit7" value="Bit 7&#xa;UTF指示&#xa;0=UTF-8&#xa;1=UTF-16" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="30" y="97" width="90" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="bit6" value="Bit 6&#xa;保留&#xa;(始终为0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="130" y="97" width="70" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="bits5-0" value="Bits 5-0: 语言编码长度&#xa;(如 &quot;en&quot; → 2, &quot;zh&quot; → 2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="210" y="97" width="580" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="lang-label" value="字节 1..N" style="text;html=1;fontSize=11;fontStyle=1;align=center;" parent="1" vertex="1">
+          <mxGeometry x="20" y="160" width="60" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="lang-box" value="语言编码&#xa;(如 &quot;en&quot;, &quot;zh-CN&quot;)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="20" y="180" width="200" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="text-label" value="字节 N+1.." style="text;html=1;fontSize=11;fontStyle=1;align=center;" parent="1" vertex="1">
+          <mxGeometry x="250" y="160" width="60" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="text-box" value="文本数据（UTF-8）&#xa;SharePayload JSON 字符串" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="250" y="180" width="550" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="arrow-sl" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2;" parent="1" source="byte0-box" target="lang-box" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="120" y="165" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="arrow-lt" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;strokeWidth=2;" parent="1" source="lang-box" target="text-box" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="example-title" value="解码示例" style="text;html=1;fontSize=13;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="30" y="270" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="example-raw" value="原始字节: [0x02, 0x65, 0x6E, ...]  →  Status=0x02 → langLen=2 → lang=&quot;en&quot; → text=&quot;...&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="30" y="300" width="770" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="code-ref" value="Kotlin 解码代码: NfcUtil.decodeRecordToText()" style="text;html=1;fontSize=11;fontStyle=2;" parent="1" vertex="1">
+          <mxGeometry x="30" y="360" width="300" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="code-box" value="val status = payload[0].toInt()&#xa;val languageLength = status and 0x3F&#xa;val textStart = 1 + languageLength&#xa;payload.copyOfRange(textStart, payload.size)&#xa;    .toString(Charsets.UTF_8)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E1E1E;strokeColor=#333333;fontSize=10;fontColor=#D4D4D4;fontFamily=Cascadia Code;" parent="1" vertex="1">
+          <mxGeometry x="30" y="385" width="420" height="100" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

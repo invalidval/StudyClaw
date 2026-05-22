@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">StudyClaw</string>
+    <string name="hce_service_description">StudyClaw NFC 错题分享服务</string>
+    <string name="hce_aid_group_description">错题分享会话数据</string>
 </resources>

@@ -743,231 +743,36 @@ object OcrUtil {
 
 ===	标准对话与流式输出
 
-AI 对话通过 Retrofit 接口 `AiApiService` 对接阿里云 DashScope（通义千问）API，核心数据模型及接口定义如下：
+单题 AI 对话在 `QuestionDetailScreen` 中通过 `AiInputBar` 组件触发，由 `QuestionViewModel.chatWithAiStream()` 处理。流式输出通过 OkHttp 直接读取 SSE 响应体，实现逐字符渲染：
 
 ```kotlin
-data class AliyunChatRequest(val model: String, val input: Input)
-data class Input(val messages: List<Message>)
-data class Message(val role: String, val content: String)
-data class AliyunChatResponse(val code: String?, val output: Output?)
-data class Output(val text: String?)
-
-interface AiApiService {
-    @Headers("Content-Type: application/json")
-    @POST("/api/v1/services/aigc/text-generation/generation")
-    suspend fun chat(@Body request: AliyunChatRequest): Response<AliyunChatResponse>
-
-    @Headers("Content-Type: application/json", "X-DashScope-SSE: enable")
-    @POST("/api/v1/services/aigc/text-generation/generation")
-    @Streaming
-    suspend fun chatStream(@Body request: AliyunChatRequest): okhttp3.ResponseBody
-}
+suspend fun chatWithAiStream(request: AliyunChatRequest): okhttp3.ResponseBody =
+    aiApiService.chatStream(request)
 ```
 
-接口提供两种模式：非流式 `chat()` 返回完整 JSON 响应，用于题目摘要生成等非实时场景；流式 `chatStream()` 标注 `@Streaming` 并设置 `X-DashScope-SSE: enable` 请求头，返回原始 `ResponseBody`，用于对话界面实时渲染。
-
-`QuestionViewModel.chatWithAiStream()` 是流式对话的核心，其骨架实现如下：
-
-```kotlin
-fun chatWithAiStream(message: String) {
-    streamJob?.cancel()                          // 取消上一次流式请求
-    streamJob = viewModelScope.launch {
-        _isLoading.value = true
-        _aiStreamResponse.value = ""
-
-        val request = AliyunChatRequest(
-            model = "qwen-plus",
-            input = Input(messages = listOf(Message(role = "user", content = message)))
-        )
-        withContext(Dispatchers.IO) {
-            val responseBody = useCases.chatWithAiStream(request)
-            val source = responseBody.source()
-            val buffer = StringBuilder()
-
-            while (isActive) {
-                val line = source.readUtf8Line() ?: break         // 逐行读取 SSE
-                if (!line.startsWith("data:")) continue
-                val jsonStr = line.removePrefix("data:").trim()
-                if (jsonStr == "[DONE]") break                    // 流结束标志
-
-                val content = JSONObject(jsonStr)
-                    .optJSONObject("output")?.optString("text") ?: ""
-                if (content.isBlank()) continue
-
-                // diff 比较：仅追加增量，避免重复渲染
-                val diff = if (content.startsWith(buffer.toString()))
-                    content.removePrefix(buffer.toString()) else content
-                if (diff.isNotEmpty()) {
-                    buffer.append(diff)
-                    withContext(Dispatchers.Main) {
-                        _aiStreamResponse.value = buffer.toString()   // 更新 UI
-                    }
-                }
-            }
-        }
-        _isLoading.value = false
-    }
-}
-```
-
-该方法在 `viewModelScope` 中启动协程，构造请求后在 `Dispatchers.IO` 上通过 `source.readUtf8Line()` 逐行读取 SSE 帧。核心逻辑：过滤 `data:` 前缀行，遇 `[DONE]` 停止；解析 `output.text` 字段后用 diff 比较去重——若新内容以旧 buffer 为前缀则截去已输出部分；最终切到 `Dispatchers.Main` 更新 `_aiStreamResponse`（`MutableStateFlow<String>`），UI 通过 `collectAsState()` 实时渲染。错误处理覆盖 `SocketTimeoutException` 和 `IOException`，`streamJob` 引用支持外部取消流式请求。
-
-在 `FocusScreen` 中，流式响应的展示增加了一层逐字平滑动画：
-
-```kotlin
-LaunchedEffect(aiStreamResponse, isLoading) {
-    if (!isLoading) { smoothStreamResponse = ""; return@LaunchedEffect }
-    if (aiStreamResponse.length <= smoothStreamResponse.length) {
-        smoothStreamResponse = aiStreamResponse; return@LaunchedEffect
-    }
-    val append = aiStreamResponse.substring(smoothStreamResponse.length)
-    var offset = 0
-    while (offset < append.length && isActive) {
-        val step = when {
-            append.length > 240 -> 12
-            append.length > 120 -> 8
-            append.length > 60 -> 5
-            else -> 3
-        }
-        val next = (offset + step).coerceAtMost(append.length)
-        smoothStreamResponse += append.substring(offset, next)
-        offset = next
-        delay(14)
-    }
-}
-```
-
-该 `LaunchedEffect` 监听 `aiStreamResponse` 变化，将新增字符以可变步长（3\~12 字符/次）和 14ms 间隔逐步追加到 `smoothStreamResponse`，模拟实时生成效果。
+在 ViewModel 中，流式请求的响应通过 `okhttp3.ResponseBody.source()` 逐行读取 SSE 帧，按 `data:` 前缀提取文本，累计更新 `aiStreamResponse` StateFlow，UI 实时渲染。
 
 ===	FocusScreen 工具调用 AI
 
-`FocusScreen` 是本系统的核心模块，通过自定义工具调用协议使 AI 能够直接操作本地题库数据库。
-
-- *系统提示与对话组装：* 系统通过一份结构化的 `systemPrompt` 定义 AI 行为边界，其核心内容为：
+`FocusScreen`（约 1015 行）是本系统最具创新的功能模块，通过定义特殊的工具调用协议使 AI 能够直接操作题库数据库。系统`prompt`中定义了如下工具协议：
 
 ```text
-你是 StudyClaw 智能错题本的 AI 助手，只能用中文与用户交流，风格简洁专业。
-你的能力：
-- 通过输出 #TOOL# { ... } JSON 结构调用错题管理工具，支持 add、delete、
-  update、query、archive、unarchive。
-- 增删查改需求优先 query 搜索候选，再基于 id 执行后续操作。
-- delete/update/archive 必须使用 id 或 ids。没有 id 时先 query 并反问确认。
-- 工具调用格式为 #TOOL# { "action":..., ... }，不要输出多余内容。
-- 一次回复可输出多个 #TOOL# JSON（按顺序逐条执行）完成批量任务。
-- 工具调用后用简洁自然语言总结反馈，不直接输出 JSON。
-- add 操作必须提供非空题干；字段缺失或仅为占位词则失败入库。
-- update 禁止修改 isArchived/archiveType，归档相关字段只能由 action=archive 处理。
-- 回答归档状态问题前必须先 query 获取实际字段（isArchived、archiveType），不可臆测。
-- 自动归档/智能分类时先 query 获取目标集合，再逐条按内容生成具体 archiveType，
-  禁止整批归到“auto-classified”笼统类型。
-```
-
-对话历史以 `ChatMessage(role, content)` 格式存储，通过 `SharedPreferences` 持久化缓存（上限 100 条）。`buildPrompt()` 函数每次发送前将 `systemPrompt` 与对话历史拼接：
-
-```kotlin
-fun buildPrompt(nextUserInput: String? = null): String {
-    val historyMessages = trimHistoryByRounds(messages, maxHistoryRounds)
-    val history = historyMessages.joinToString("\n") {
-        when (it.role) {
-            "user" -> "用户：" + it.content
-            "assistant" -> "助手：" + it.content
-            "tool" -> "#TOOL# " + it.content
-            else -> it.content
-        }
-    }
-    return if (nextUserInput != null) {
-        "$systemPrompt\n$history\n用户：$nextUserInput"
-    } else {
-        "$systemPrompt\n$history\n请基于最新工具结果继续完成上一轮用户需求；如仍需工具，请继续输出 #TOOL# JSON。"
-    }
+当需要操作题库时，请在回复中输出以下格式的指令块：
+#TOOL# {
+  "action": "add" | "query" | "delete" | "update" | "archive" | "unarchive",
+  "params": { ... }
 }
 ```
 
-历史通过 `trimHistoryByRounds()` 裁剪至最近 10 轮用户对话（`maxHistoryRounds=10`，以 `role="user"` 为轮次边界）。工具类型消息以 `#TOOL#` 前缀标记供 AI 理解。无新用户输入时（自动循环），使用特殊后缀提示 AI 基于工具结果继续。
+支持的工具操作包括：
+- `add`：新增错题（包含 ocrText、summary、subject、difficulty、aiAnalysis 等字段）。
+- `query`：查询错题库（支持按 subject、difficulty、archiveType 等条件过滤）。
+- `delete`：删除指定错题（按 id）。
+- `update`：更新错题内容（按 id 指定）。
+- `archive`：归档错题（基于摘要智能推断归档类型，如"物理""数学""算法"等）。
+- `unarchive`：取消归档。
 
-- *工具协议解析：* AI 在回复中输出 `#TOOL# { "action": "...", ... }` 格式的 JSON 指令块。解析函数通过标记定位与大括号深度匹配提取完整 JSON：
-
-```kotlin
-fun extractToolJsonBlocksFromResponse(text: String): List<String> {
-    val marker = "#TOOL#"
-    val blocks = mutableListOf<String>()
-    var searchStart = 0
-    while (true) {
-        val markerIndex = text.indexOf(marker, searchStart)
-        if (markerIndex < 0) break
-        val jsonStart = text.indexOf('{', markerIndex + marker.length)
-        if (jsonStart < 0) { searchStart = markerIndex + marker.length; continue }
-        var depth = 0
-        var jsonEnd = -1
-        for (i in jsonStart until text.length) {
-            when (text[i]) {
-                '{' -> depth++
-                '}' -> { depth-- ; if (depth == 0) { jsonEnd = i; break } }
-            }
-        }
-        if (jsonEnd < 0) break
-        blocks += text.substring(jsonStart, jsonEnd + 1).trim()
-        searchStart = jsonEnd + 1
-    }
-    return blocks
-}
-```
-
-- *工具执行流程：* 流式响应完成后，若检测到有效的 `#TOOL#` JSON 块，系统按顺序执行每条指令。核心分发逻辑的简化代码如下：
-
-```kotlin
-when (action) {
-    "add" -> {
-        val question = pickText(toolCall, "question", "ocrText", "title", "content")
-        if (question.isNullOrBlank()) { /* 返回失败：题干不能为空 */ }
-        // 子串匹配去重，无重复则调用 viewModel.addQuestion() 入库
-        // 摘要未提供时自动调用 viewModel.generateSummary() 生成（不超过 20 字）
-    }
-    "query" -> {
-        val filtered = when {
-            ids.isNotEmpty() -> all.filter { ids.contains(it.id) }
-            keyword.isNotBlank() -> all.filter {
-                it.ocrText.contains(keyword) || it.summary.contains(keyword)
-            }
-            else -> all.takeLast(20)
-        }
-        toolResult = JsonObject(mapOf(
-            "result" to JsonPrimitive("success"),
-            "rows" to rows,           // 结构化字段数组，供后续工具操作
-            "markdown" to JsonPrimitive(markdown)  // 人类可读列表，供 AI 总结
-        )).toString()
-    }
-    "delete" -> /* 按 id 精确软删除，无 id 则返回候选列表要求用户确认 */
-    "update" -> /* 解析 field/value 或 fields 对象，禁止修改 isArchived/archiveType */
-    "archive" -> {
-        when (archiveType) {
-            "auto" -> targets.forEach { viewModel.archiveQuestion(it.id, inferArchiveType(it)) }
-            "none", "null", "取消归档" -> targets.forEach { viewModel.unarchiveQuestion(it.id) }
-            else -> targets.forEach { viewModel.archiveQuestion(it.id, archiveType) }
-        }
-    }
-    "unarchive" -> /* 按 id 取消归档，调用 viewModel.unarchiveQuestion() */
-}
-```
-
-`inferArchiveType()` 启发式函数基于 subject 字段和 ocrText/summary 内容进行关键词匹配，覆盖六大类（计算机、数学、物理、化学、语文、英语），当内容含"算法/数据结构/编程/代码"等归为计算机，含"函数/方程/几何"归为数学，以此类推；无法匹配则归为"待整理"。
-
-- *自动工具循环：* 所有工具块执行完毕后，系统自动进入下一轮 AI 对话：
-
-```kotlin
-if (autoToolDepth >= maxAutoToolDepth) {
-    appendMessage(ChatMessage(role = "assistant",
-        content = "工具调用次数已达上限，请确认后继续。"))
-    autoToolDepth = 0
-    return@launch
-}
-autoToolDepth += 1
-viewModel.chatWithAiStream(buildPrompt())
-// buildPrompt() 无参数时将拼接："请基于最新工具结果继续完成上一轮用户需求；
-// 如仍需工具，请继续输出 #TOOL# JSON。"
-```
-
-每次工具执行后 `autoToolDepth` 递增（同一轮回复中的多个工具块只计一次），上限 `maxAutoToolDepth=5`。AI 根据结构化的工具返回结果继续决策，若仍需更多操作则再次输出 `#TOOL#` 指令。这个循环形成了"用户需求 $arrow$ AI 决策 $arrow$ 工具执行 $arrow$ 结果反馈 $arrow$ AI 再决策"的完整闭环；达到 5 轮上限后以自然语言提示用户确认，防止无限循环。
+FocusScreen 在解析 AI 流式回复时，通过正则表达式匹配 `#TOOL#` 指令块，解析出 JSON 指令后执行对应的数据库操作，并将结果反馈给 AI 继续对话，形成了一个 AI 与本地数据交互的闭环。
 
 #figure(
   caption: [FocusScreen AI 工具调用循环],

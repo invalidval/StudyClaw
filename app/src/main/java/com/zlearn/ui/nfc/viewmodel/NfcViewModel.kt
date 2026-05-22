@@ -3,6 +3,7 @@ package com.zlearn.ui.nfc.viewmodel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.ViewModel
 import android.os.SystemClock
+import android.util.Log
 import com.zlearn.utils.BleShareTransport
 import com.zlearn.utils.NfcShareCodec
 import com.zlearn.utils.NfcUtil
@@ -22,6 +23,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 sealed interface NfcUiState {
     data object Idle : NfcUiState
     data class Detected(val payload: String, val eventId: Long) : NfcUiState
+    data class BroadcastDiscovering(val devices: List<BleShareTransport.BroadcastDeviceInfo>) : NfcUiState
     data class Importing(val payload: String, val eventId: Long, val preview: SharePreview? = null) : NfcUiState
     data class Result(val message: String, val preview: SharePreview? = null) : NfcUiState
     data class Error(val message: String) : NfcUiState
@@ -50,6 +52,14 @@ class NfcViewModel @Inject constructor(
     private val debounceWindowMs = 800L
     private var importTimeoutJob: Job? = null
     private val importTimeoutMs = 45_000L
+
+    companion object {
+        private const val TAG = "NfcViewModel"
+    }
+
+    private fun isValidUuid(str: String): Boolean {
+        return runCatching { java.util.UUID.fromString(str) }.isSuccess
+    }
 
     private fun buildPreview(payload: com.zlearn.domain.model.SharePayload): SharePreview {
         val firstItem = payload.items.firstOrNull()
@@ -97,9 +107,20 @@ class NfcViewModel @Inject constructor(
             val startResult = BleShareTransport.startScanning(context) { data ->
                 viewModelScope.launch {
                     try {
-                        val payload = NfcShareCodec.decode(data).getOrNull()
-                        val shouldValidateSession = current.payload.isNotBlank() && !current.payload.startsWith("TAG_ID:")
-                        if (payload != null && (!shouldValidateSession || payload.sessionId == current.payload)) {
+                        // 使用 exceptionOrNull() 提取解码异常，定位根本原因
+                        val decodeResult = NfcShareCodec.decode(data)
+                        val payload = decodeResult.getOrNull()
+                        if (payload == null) {
+                            val ex = decodeResult.exceptionOrNull()
+                            Log.e(TAG, "decode FAILED: ${ex?.javaClass?.simpleName}: ${ex?.message}", ex)
+                            Log.e(TAG, "raw data(len=${data.length}), last 80 chars: >>${data.takeLast(80)}<<")
+                        }
+                        val bleSessionId = payload?.sessionId ?: "<null>"
+                        Log.d(TAG, "BLE data received, bleSessionId=$bleSessionId, dataLen=${data.length}, nfcPayload=${current.payload}")
+
+                        // 严格校验：NFC payload 必须为合法 UUID，且与 BLE 数据的 sessionId 精确匹配
+                        if (payload != null && isValidUuid(current.payload) && payload.sessionId == current.payload) {
+                            Log.d(TAG, "session validation passed, importing ${payload.items.size} items")
                             val preview = buildPreview(payload)
                             _uiState.value = NfcUiState.Importing(data, current.eventId, preview)
                             delay(250)
@@ -137,9 +158,10 @@ class NfcViewModel @Inject constructor(
                                 _uiState.value = NfcUiState.Result("已收到并导入: $imported 条题目", preview)
                             }
                         } else {
+                            Log.w(TAG, "session validation FAILED: nfcIsUuid=${isValidUuid(current.payload)}, blePayloadNull=${payload == null}, nfcPayload=${current.payload.take(60)}, bleSessionId=$bleSessionId")
                             importTimeoutJob?.cancel()
                             BleShareTransport.stopScanning()
-                            _uiState.value = NfcUiState.Error("接收数据失败或sessionId不匹配")
+                            _uiState.value = NfcUiState.Error("接收数据失败或sessionId不匹配\nNFC: ${current.payload.take(40)}\nBLE: $bleSessionId")
                         }
                     } catch (e: Exception) {
                         importTimeoutJob?.cancel()
@@ -171,6 +193,79 @@ class NfcViewModel @Inject constructor(
             if (startResult != BleShareTransport.ScanStartResult.Started) {
                 importTimeoutJob?.cancel()
                 BleShareTransport.stopScanning()
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    //  广播模式：扫描周边设备，用户手动选择
+    // ═══════════════════════════════════════════════
+    fun startBroadcastScan() {
+        importTimeoutJob?.cancel()
+        _uiState.value = NfcUiState.BroadcastDiscovering(emptyList())
+        val scanResult = BleShareTransport.startBroadcastScan(context) { device ->
+            val current = _uiState.value
+            if (current is NfcUiState.BroadcastDiscovering) {
+                _uiState.value = current.copy(devices = current.devices + device)
+            }
+        }
+        when (scanResult) {
+            BleShareTransport.ScanStartResult.Started -> Unit
+            else -> { BleShareTransport.stopScanning(); _uiState.value = NfcUiState.Error("广播扫描启动失败") }
+        }
+    }
+
+    fun selectBroadcastDevice(device: BleShareTransport.BroadcastDeviceInfo) {
+        val sid = device.sessionId ?: run {
+            _uiState.value = NfcUiState.Error("未从该设备收到有效 sessionId，请确认对方已开启分享")
+            return
+        }
+        BleShareTransport.stopScanning()
+        importTimeoutJob?.cancel()
+        viewModelScope.launch {
+            _uiState.value = NfcUiState.Importing(sid, 0)
+            importTimeoutJob = viewModelScope.launch {
+                delay(importTimeoutMs)
+                if (_uiState.value is NfcUiState.Importing) {
+                    BleShareTransport.stopScanning()
+                    _uiState.value = NfcUiState.Error("BLE 导入超时，请重试")
+                }
+            }
+            BleShareTransport.connectToBroadcastDevice(context, device.address, sid) { data ->
+                viewModelScope.launch {
+                    try {
+                        val payload = NfcShareCodec.decode(data).getOrNull()
+                        if (payload != null && payload.sessionId == sid) {
+                            val preview = buildPreview(payload)
+                            _uiState.value = NfcUiState.Importing(sid, 0, preview)
+                            delay(250)
+                            var imported = 0
+                            for (item in payload.items) {
+                                useCases.addQuestion(QuestionEntity(
+                                    id = 0, imagePath = "",
+                                    ocrText = item.ocrText, aiAnalysis = item.aiAnalysis,
+                                    summary = item.summary, subject = item.subject,
+                                    difficulty = item.difficulty, createTime = System.currentTimeMillis(),
+                                    isArchived = item.isArchived, archiveType = item.archiveType
+                                ))
+                                imported++
+                            }
+                            val ackSent = BleShareTransport.sendAck(payload.sessionId) { ok ->
+                                viewModelScope.launch {
+                                    importTimeoutJob?.cancel(); BleShareTransport.stopScanning()
+                                    _uiState.value = if (ok) NfcUiState.Result("已收到并导入: $imported 条题目", preview)
+                                    else NfcUiState.Error("已导入，但未能向发送方回传确认")
+                                }
+                            }
+                            if (!ackSent) { importTimeoutJob?.cancel(); BleShareTransport.stopScanning()
+                                _uiState.value = NfcUiState.Result("已收到并导入: $imported 条题目", preview) }
+                        } else {
+                            importTimeoutJob?.cancel(); BleShareTransport.stopScanning()
+                            _uiState.value = NfcUiState.Error("接收数据失败或sessionId不匹配\n期望: $sid\n实际: ${payload?.sessionId ?: "<null>"}")
+                        }
+                    } catch (e: Exception) { importTimeoutJob?.cancel(); BleShareTransport.stopScanning()
+                        _uiState.value = NfcUiState.Error("导入失败: ${e.message}") }
+                }
             }
         }
     }

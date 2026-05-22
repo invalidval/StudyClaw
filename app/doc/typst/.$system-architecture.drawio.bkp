@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-05-07T00:00:00.000Z" agent="5.0" version="21.0.0">
+  <diagram id="system-architecture" name="系统总体架构">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ============================================ -->
+        <!-- 客户端大框 -->
+        <!-- ============================================ -->
+        <mxCell id="client-box" value="Android 客户端 (Kotlin)" style="swimlane;startSize=30;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="340" height="540" as="geometry" />
+        </mxCell>
+
+        <!-- UI Layer -->
+        <mxCell id="ui-layer" value="UI Layer (Jetpack Compose + Material 3)" style="swimlane;startSize=24;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="client-box">
+          <mxGeometry x="16" y="40" width="308" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ui-detail" value="题库列表 / 题目详情 / NFC分享 / AI对话 / QR" style="text;fontSize=10;align=center;" vertex="1" parent="ui-layer">
+          <mxGeometry x="10" y="30" width="288" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ViewModel Layer -->
+        <mxCell id="vm-layer" value="ViewModel Layer (StateFlow)" style="swimlane;startSize=24;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;" vertex="1" parent="client-box">
+          <mxGeometry x="16" y="110" width="308" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="vm-detail" value="QuestionViewModel / NfcViewModel / UserViewModel / ..." style="text;fontSize=10;align=center;" vertex="1" parent="vm-layer">
+          <mxGeometry x="10" y="30" width="288" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- Domain Layer -->
+        <mxCell id="domain-layer" value="Domain Layer (UseCases)" style="swimlane;startSize=24;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;" vertex="1" parent="client-box">
+          <mxGeometry x="16" y="180" width="308" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="domain-detail" value="QuestionUseCases" style="text;fontSize=10;align=center;" vertex="1" parent="domain-layer">
+          <mxGeometry x="10" y="30" width="288" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- Data Layer -->
+        <mxCell id="data-layer" value="Data Layer (Repository Pattern)" style="swimlane;startSize=24;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;" vertex="1" parent="client-box">
+          <mxGeometry x="16" y="250" width="308" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="data-room" value="Room\n(SQLite 本地DB)" style="rounded=1;fillColor=#FFFFFF;strokeColor=#B85450;fontSize=10;" vertex="1" parent="data-layer">
+          <mxGeometry x="10" y="40" width="90" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="data-retrofit" value="Retrofit\n(后端API)" style="rounded=1;fillColor=#FFFFFF;strokeColor=#B85450;fontSize=10;" vertex="1" parent="data-layer">
+          <mxGeometry x="110" y="40" width="90" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="data-ai" value="AiApiService\n(阿里云AI)" style="rounded=1;fillColor=#FFFFFF;strokeColor=#B85450;fontSize=10;" vertex="1" parent="data-layer">
+          <mxGeometry x="210" y="40" width="90" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Utils -->
+        <mxCell id="utils-layer" value="Utils" style="swimlane;startSize=24;fillColor=#F5F5F5;strokeColor=#666666;fontSize=11;" vertex="1" parent="client-box">
+          <mxGeometry x="16" y="390" width="308" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="utils-detail" value="MLKit OCR / NFC / BLE / QR / Codec" style="text;fontSize=10;align=center;" vertex="1" parent="utils-layer">
+          <mxGeometry x="10" y="30" width="288" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ============================================ -->
+        <!-- 后端大框 -->
+        <!-- ============================================ -->
+        <mxCell id="backend-box" value="Backend Server (Python Flask)" style="swimlane;startSize=30;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="470" y="200" width="300" height="220" as="geometry" />
+        </mxCell>
+
+        <!-- REST API -->
+        <mxCell id="api-layer" value="REST API" style="swimlane;startSize=24;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="backend-box">
+          <mxGeometry x="16" y="40" width="268" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="api-detail" value="register / login / sync / heartbeat / check_ip" style="text;fontSize=10;align=center;" vertex="1" parent="api-layer">
+          <mxGeometry x="10" y="30" width="248" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- SQLite -->
+        <mxCell id="db-layer" value="SQLite 3 Database" style="swimlane;startSize=24;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;" vertex="1" parent="backend-box">
+          <mxGeometry x="16" y="110" width="268" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="db-detail" value="users 表 + questions 表 (users.db)" style="text;fontSize=10;align=center;" vertex="1" parent="db-layer">
+          <mxGeometry x="10" y="30" width="248" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ============================================ -->
+        <!-- 连线 -->
+        <!-- ============================================ -->
+        <mxCell id="arrow-ui-vm" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="ui-layer" target="vm-layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow-vm-domain" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;" edge="1" parent="1" source="vm-layer" target="domain-layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow-domain-data" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;" edge="1" parent="1" source="domain-layer" target="data-layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow-data-utils" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;" edge="1" parent="1" source="data-layer" target="utils-layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow-retrofit-api" value="HTTP REST / SSE" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;fontSize=11;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="data-retrofit" target="api-layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arrow-api-db" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;strokeWidth=2;" edge="1" parent="1" source="api-layer" target="db-layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
