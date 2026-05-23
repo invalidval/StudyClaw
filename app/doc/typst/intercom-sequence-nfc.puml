@@ -1,0 +1,98 @@
+@startuml intercom-sequence-nfc
+' NFC 碰触模式 — 完整交互时序图
+' 导出: plantuml -tpng -scale 2 intercom-sequence-nfc.puml
+
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName SimSun
+skinparam defaultFontSize 12
+skinparam sequenceArrowThickness 2.5
+skinparam roundcorner 12
+skinparam maxmessagesize 280
+skinparam boxPadding 16
+skinparam participantPadding 70
+skinparam sequenceMessageAlign center
+
+skinparam actor {
+  BackgroundColor #DBEAFE
+  BorderColor #3B82F6
+  FontColor #1E3A5F
+  FontStyle bold
+}
+skinparam participant {
+  BackgroundColor #F3E8FF
+  BorderColor #9333EA
+  FontColor #4C1D95
+  FontStyle bold
+}
+skinparam note {
+  BackgroundColor #FFFBEB
+  BorderColor #F59E0B
+  FontColor #78350F
+  FontSize 11
+}
+
+title **NFC 碰触模式 — 完整交互流程**
+footer 智能错题本 · NFC 碰触模式 P2P 分享
+
+actor "**发送端**\n(Sender)" as S
+participant "HCE\nService" as H #F3E8FF
+actor "**接收端**\n(Receiver)" as R
+
+|||
+hnote over S #EBF5FF: 阶段一: 发送端准备与 BLE 广播
+|||
+
+S -> S: 创建 SharePayload\nNfcShareCodec.encode()
+S -> S: startAdvertising(data, sessionId)
+S -> H: setSessionData(sessionId)
+hnote over H #FEF3C7: HCE 就绪 · AID=F05A4C4541524E\nGATT Server 已启动\n⊳ NOTIFY Char (数据通道)\n⊳ WRITE Char (ACK 回传)
+
+|||
+hnote over R #EBF5FF: 阶段二: NFC HCE 会话发现
+|||
+
+R -> H: NFC 碰触\n(IsoDep.connect())
+R -> H: SELECT AID APDU\n00 A4 04 00 07 F05A4C4541524E 00
+H --> R: 9000 (OK)
+R -> H: READ BINARY APDU\n00 B0 00 00 00
+H --> R: sessionId bytes + 9000
+hnote over R #FFF7ED: 获得 sessionId\n(IsoDep 路径优先,\n失败降级 NDEF/TagID)
+
+|||
+hnote over S,R #EBF5FF: 阶段三: BLE 连接与通知订阅
+|||
+
+R -> S: connectGatt(autoConnect=false)
+R -> S: requestMtu(517)
+S --> R: MTU=517
+R -> S: discoverServices()
+R -> S: setCharacteristicNotification(NOTIFY, true)
+R -> S: writeDescriptor(CCCD, ENABLE_NOTIFICATION)
+activate H #FFF7ED
+H -> S: onDescriptorWriteRequest\n(检测到订阅)
+deactivate H
+
+|||
+hnote over S,R #EBF5FF: 阶段四: NOTIFY 推送数据 (Indication)
+|||
+
+S -> S: sleep 300ms\n(等待连接稳定)
+S --> R: notifyCharacteristicChanged\n首片: [4B 总长度 + data[0..N]]
+R -> R: 解析总长度\n累积 buffer
+S --> R: notifyCharacteristicChanged\n片2: [data[N+1..M]]
+loop 逐片发送 (每片 ≤500B, 间隔 40ms)
+  S --> R: notifyCharacteristicChanged\n...
+end
+R -> R: 累积达到总长度\n拼接完整 JSON
+
+|||
+hnote over S,R #EBF5FF: 阶段五: 校验、导入与 ACK
+|||
+
+R -> R: NfcShareCodec.decode(data)\n校验 payload.sessionId == nfcSessionId
+R -> R: 逐条构建 QuestionEntity\n写入 Room 数据库
+R -> S: writeCharacteristic(WRITE, "ACK:sessionId")
+S -> S: onCharacteristicWriteRequest\n→ onAckReceived()
+hnote over S #E0F2FE: 状态 → Completed\n清理 HCE + BLE 广播
+
+@enduml

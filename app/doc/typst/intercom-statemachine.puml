@@ -1,0 +1,55 @@
+@startuml intercom-statemachine
+' 互传 — 接收端 UI 状态机
+' 导出: plantuml -tpng -scale 2 intercom-statemachine.puml
+
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName SimSun
+skinparam defaultFontSize 13
+skinparam roundcorner 14
+skinparam state {
+  BorderColor #3B82F6
+  FontSize 13
+}
+
+title **互传接收端 UI 状态机 — NfcUiState**
+footer 智能错题本 · 接收端状态机
+
+state "**Idle**\n(空闲等待)" as Idle #EFF6FF
+state "**Detected**\n(NFC 检测到会话)" as Detected #FEF3C7
+state "**BroadcastDiscovering**\n(广播扫描中)" as Broadcasting #FCE7F3
+state "**Importing**\n(正在接收与导入)" as Importing #DBEAFE
+state "**Result**\n(导入成功)" as Result #DCFCE7
+state "**Error**\n(导入失败)" as Error #FEE2E2
+
+[*] --> Idle
+
+Idle --> Detected: NFC Reader Mode\n检测到合法 sessionId
+Idle --> Broadcasting: 用户点击"开始扫描"
+
+Broadcasting --> Importing: 用户选择目标设备\n(connectToBroadcastDevice)
+Broadcasting --> Idle: 点击"取消"
+
+Detected --> Importing: 用户点击"确认导入"\n(启动 BLE 扫描)
+
+Importing --> Importing: BLE NOTIFY 数据到达\n展示 SharePreview 预览
+Importing --> Result: 数据接收完毕\nsessionId 校验通过\n逐条入库 + sendAck 成功
+Importing --> Error: 45秒超时\n或 sessionId 不匹配\n或 BLE 连接失败
+Importing --> Error: JSON 解码失败
+
+Result --> Idle: 点击"完成"\n或 viewModel.reset()
+Error --> Idle: 点击"重试"\n或 viewModel.reset()
+
+note right of Importing
+  设置 45 秒超时保护
+  BLE NOTIFY Indication
+  逐片累积拼接 JSON
+end note
+
+note right of Detected
+  若 payload 非合法 UUID
+  (交通卡干扰)
+  不显示确认按钮，
+  提示更换轻触位置
+end note
+
+@enduml

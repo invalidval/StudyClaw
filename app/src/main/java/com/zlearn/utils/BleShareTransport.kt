@@ -211,35 +211,40 @@ object BleShareTransport {
         if (isSendingNotify) return
         isSendingNotify = true
 
-        Thread {
-            try {
-                val maxChunkSize = minOf((serverMtu - 3).coerceAtLeast(20), 500)
+        // 在回调线程 (Binder) 中执行，避免跨线程调用 notifyCharacteristicChanged 静默失败
+        try {
+            // 等待连接参数协商稳定后再发送通知（国产手机 BLE 芯片需要更长时间）
+            Thread.sleep(300)
 
-                // 第一包: 4 字节总长度(大端) + 数据
-                val firstDataLen = minOf(maxChunkSize - 4, data.size)
-                val firstChunk = ByteArray(4 + firstDataLen)
-                writeIntBE(firstChunk, 0, data.size)
-                System.arraycopy(data, 0, firstChunk, 4, firstDataLen)
+            val maxChunkSize = minOf((serverMtu - 3).coerceAtLeast(20), 500)
 
-                characteristic.value = firstChunk
-                var ok = gattServer?.notifyCharacteristicChanged(device, characteristic, false) ?: false
-                if (!ok) { Log.w(TAG, "notify first chunk failed"); return@Thread }
+            // 第一包: 4 字节总长度(大端) + 数据
+            val firstDataLen = minOf(maxChunkSize - 4, data.size)
+            val firstChunk = ByteArray(4 + firstDataLen)
+            writeIntBE(firstChunk, 0, data.size)
+            System.arraycopy(data, 0, firstChunk, 4, firstDataLen)
 
-                var offset = firstDataLen
-                while (offset < data.size) {
-                    Thread.sleep(30)
-                    val end = minOf(offset + maxChunkSize, data.size)
-                    val chunk = data.copyOfRange(offset, end)
-                    characteristic.value = chunk
-                    ok = gattServer?.notifyCharacteristicChanged(device, characteristic, false) ?: false
-                    if (!ok) { Log.w(TAG, "notify chunk at $offset failed"); break }
-                    offset = end
-                }
-                Log.d(TAG, "notify push complete: sent ${data.size} bytes")
-            } finally {
-                isSendingNotify = false
+            characteristic.value = firstChunk
+            var ok = gattServer?.notifyCharacteristicChanged(device, characteristic, true) ?: false
+            Log.d(TAG, "notify chunk0 size=${firstChunk.size} ok=$ok")
+            if (!ok) { return }
+
+            var offset = firstDataLen
+            while (offset < data.size) {
+                Thread.sleep(40)
+                val end = minOf(offset + maxChunkSize, data.size)
+                val chunk = data.copyOfRange(offset, end)
+                characteristic.value = chunk
+                ok = gattServer?.notifyCharacteristicChanged(device, characteristic, true) ?: false
+                if (!ok) { Log.w(TAG, "notify chunk at $offset failed"); break }
+                offset = end
             }
-        }.start()
+            Log.d(TAG, "notify push complete: sent ${offset}/${data.size} bytes")
+        } catch (e: Exception) {
+            Log.e(TAG, "notify push error: ${e.message}", e)
+        } finally {
+            isSendingNotify = false
+        }
     }
 
     private fun writeIntBE(buf: ByteArray, off: Int, v: Int) {
@@ -471,24 +476,33 @@ object BleShareTransport {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     runCatching { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) }
                     val mtuOk = runCatching { gatt.requestMtu(517) }.getOrDefault(false)
-                    if (!mtuOk) { try { gatt.javaClass.getMethod("refresh").invoke(gatt) } catch (_: Exception) {}; gatt.discoverServices() }
+                    if (!mtuOk) gatt.discoverServices()
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) { gatt.close(); currentGatt = null }
             }
             override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
-                try { gatt.javaClass.getMethod("refresh").invoke(gatt) } catch (_: Exception) {}
                 gatt.discoverServices()
             }
             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
                 if (status != BluetoothGatt.GATT_SUCCESS) { gatt.close(); currentGatt = null; return }
-                val notifyChar = gatt.getService(SERVICE_UUID)?.getCharacteristic(CHAR_NOTIFY_UUID)
-                currentAckCharacteristic = gatt.getService(SERVICE_UUID)?.getCharacteristic(ACK_CHARACTERISTIC_UUID)
-                if (notifyChar == null) { gatt.close(); currentGatt = null; return }
+                val svc = gatt.getService(SERVICE_UUID) ?: run { gatt.close(); currentGatt = null; return }
+                val notifyChar = svc.getCharacteristic(CHAR_NOTIFY_UUID)
+                currentAckCharacteristic = svc.getCharacteristic(ACK_CHARACTERISTIC_UUID)
+                if (notifyChar == null) {
+                    Log.w(TAG, "broadcast: notify characteristic not found")
+                    gatt.close(); currentGatt = null; return
+                }
                 notifyAccumulator = ByteArray(0); notifyTotalSize = -1
-                gatt.setCharacteristicNotification(notifyChar, true)
-                val cccd = notifyChar.getDescriptor(CCCD_UUID) ?: return
+                val notifyOk = gatt.setCharacteristicNotification(notifyChar, true)
+                Log.d(TAG, "broadcast: setCharacteristicNotification=$notifyOk")
+                val cccd = notifyChar.getDescriptor(CCCD_UUID)
+                if (cccd == null) {
+                    Log.w(TAG, "broadcast: CCCD descriptor not found")
+                    gatt.close(); currentGatt = null; return
+                }
                 @Suppress("DEPRECATION")
                 cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(cccd)
+                val wOk = gatt.writeDescriptor(cccd)
+                Log.d(TAG, "broadcast: writeDescriptor(CCCD)=$wOk")
             }
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
                 if (notifyTotalSize == -1 && value.size >= 4) {

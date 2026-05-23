@@ -1,0 +1,92 @@
+@startuml intercom-frames
+' BLE NOTIFY 分片帧 + APDU 命令帧 结构图
+' 导出: plantuml -tpng -scale 2 intercom-frames.puml
+
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName SimSun
+skinparam defaultFontSize 12
+skinparam roundcorner 8
+skinparam rectangle {
+  BorderColor #3B82F6
+  BackgroundColor #EFF6FF
+}
+skinparam titleFontSize 14
+
+title **互传协议帧结构**
+footer 智能错题本 · BLE NOTIFY + APDU 帧格式
+
+' ============================================
+'  NOTIFY 首片帧结构
+' ============================================
+rectangle "**BLE NOTIFY 首片帧结构**\n(第一片通知, Indication 模式)" as notify_first #EFF6FF {
+  rectangle "Byte 0—3" as nf_hdr #DBEAFE {
+    card "总长度\n(BigEndian Int32)\neq. 0x00 00 04 25\n→ 1061 bytes" as hdr_detail
+  }
+  rectangle "Byte 4—N" as nf_data #FCE7F3 {
+    card "数据负载\n(UTF-8 JSON 正文)" as data_detail
+  }
+}
+
+note right of notify_first
+  片大小上限:
+  min(MTU-3, 500) 字节
+  使用 confirm=true
+  (Indication)
+end note
+
+' ============================================
+'  NOTIFY 后续片帧结构
+' ============================================
+rectangle "**BLE NOTIFY 后续片帧结构**" as notify_rest #EFF6FF {
+  rectangle "Byte 0—N" as nr_data #FCE7F3 {
+    card "数据负载 (续)" as rest_detail
+  }
+}
+
+notify_first -[hidden]down- notify_rest
+
+' ============================================
+'  APDU 帧结构
+' ============================================
+
+rectangle "**APDU 帧结构** (ISO 7816-4, IsoDep 链路)" as apdu_frame #EFF6FF {
+
+  rectangle "-\nSELECT APDU\n(接收端 → 发送端 HCE)" as select_frame #F0FDF4 {
+    rectangle "CLA\n00" as select_cla #DCFCE7
+    rectangle "INS\nA4" as select_ins #DCFCE7
+    rectangle "P1\n04" as select_p1 #DCFCE7
+    rectangle "P2\n00" as select_p2 #DCFCE7
+    rectangle "Lc\n07" as select_lc #DCFCE7
+    rectangle "AID\nF0 5A 4C\n45 41 52\n4E" as select_aid #DCFCE7
+    rectangle "Le\n00" as select_le #DCFCE7
+  }
+
+  rectangle "-\nSELECT Response\n(HCE → 接收端)" as select_resp #FEF3C7 {
+    card "90 00\n(成功状态字)" as resp_ok
+  }
+
+  rectangle "-\nREAD BINARY APDU\n(接收端 → 发送端 HCE)" as read_frame #F0FDF4 {
+    rectangle "CLA\n00" as read_cla #DCFCE7
+    rectangle "INS\nB0" as read_ins #DCFCE7
+    rectangle "P1\n00" as read_p1 #DCFCE7
+    rectangle "P2\n00" as read_p2 #DCFCE7
+    rectangle "Le\n00" as read_le #DCFCE7
+  }
+
+  rectangle "-\nREAD BINARY Response\n(HCE → 接收端)" as read_resp #FEF3C7 {
+    card "<sessionId UTF-8 bytes>" as sid_data #DBEAFE
+    card "90 00\n(成功)" as resp_end #FEF3C7
+  }
+}
+
+' ============================================
+'  Scan Response 帧结构
+' ============================================
+rectangle "**BLE Scan Response 帧结构**\n(广播模式, manufacturer-specific data)" as scan_frame #EFF6FF {
+  rectangle "AD Type\n0xFF\n(Manufacturer)" as sr_type #FCE7F3
+  rectangle "Length" as sr_len #FCE7F3
+  rectangle "Company ID\n0xFFFD" as sr_cid #DBEAFE
+  rectangle "Data (16 bytes)\nsessionId raw UUID" as sr_data #DBEAFE
+}
+
+@enduml

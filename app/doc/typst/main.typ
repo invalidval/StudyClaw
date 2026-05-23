@@ -47,42 +47,38 @@ AI 对话能力基于阿里云 DashScope 平台，通过其兼容 OpenAI 风格�
 
 依赖注入使用 Dagger Hilt 框架，通过 `@HiltAndroidApp`、`@AndroidEntryPoint`、`@HiltViewModel` 等注解自动管理依赖关系。数据库和网络组件通过 `@Module` 和 `@Provides` 在 Singleton 作用域内提供单例实例。
 
-==	NFC 近场通信
+==	NFC 近场通信与 HCE 卡模拟
 
-NFC 功能基于 Android 原生 `android.nfc` 包实现。NFC 数据的编码格式采用 NDEF（NFC Data Exchange Format）标准中的 RTD_TEXT 记录类型。在 `AndroidManifest.xml` 中申明了 NfcA、Ndef 和 NdefFormatable 三种 NFC 技术筛选器。系统在读取器模式下支持 NFC-A、NFC-B、NFC-F、NFC-V 和 NFC-BARCODE 五种标签类型。
+NFC 功能基于 Android 原生 `android.nfc` 包实现。在互传场景中，NFC 承担设备发现阶段的会话身份交换——发送端将随机生成的 `sessionId` 暴露为虚拟 NFC 标签，接收端以读卡器模式靠近后读取该标识符，从而在 BLE 连接建立前完成身份锚定。
 
-NFC 交互分为两种模式：
-- *读取器模式*：应用在前台时启用 NFC Reader Mode，当用户将设备靠近 NFC 标签时，系统自动读取 NDEF 消息并提取文本负载。
-- *Intent 分发模式*：当应用在后台或被 NFC 标签唤醒时，通过 `NfcAdapter.ACTION_NDEF_DISCOVERED` Intent 接收数据，应用在 `AndroidManifest.xml` 中注册了自定义 MIME 类型 `application/vnd.com.zlearn.wrongbook-share` 用于过滤 NFC 分享数据。
+发送端通过 HCE（Host-based Card Emulation，基于主机的卡模拟）技术注册了一个 `HostApduService` 子类 `ShareHceService`，使用自定义 AID `F05A4C4541524E`。当接收端的 NFC 读卡器靠近时，Android NFC 固件依据 AID 路由表将 APDU 命令派发至该服务。协议遵循 ISO 7816-4 标准——接收端首先发送 SELECT 命令（CLA=0x00, INS=0xA4, P1=0x04）选定 AID，收到状态字 9000 确认后，再发送 READ BINARY 命令（00 B0 00 00 00）读取 `sessionId` 的 UTF-8 字节。HCE 服务仅在发送端已启动分享且 `sessionData` 非空时响应有效数据，否则返回 6A82（文件未找到），系统即回退至钱包等其他 HCE 服务。AID 过滤器在 `aid_filter.xml` 中以 `category="other"` 注册，避免与支付类应用的 `category="payment"` 产生冲突。
 
-#figure(
-  caption: [NFC 两种交互模式],
-  image("/assets/image-4.png")
-)
+接收端以 NF C Reader Mode 持续监听，启用 `FLAG_READER_NFC_A`、`FLAG_READER_NFC_B`、`FLAG_READER_NFC_F`、`FLAG_READER_NFC_V`、`FLAG_READER_NFC_BARCODE` 以及 `FLAG_READER_SKIP_NDEF_CHECK` 共六种标志位，确保各类 NFC 标签和 HCE 服务均能被检测到。在 Reader Mode 回调中，优先通过 `IsoDep.get(tag)` 尝试 HCE 通信路径，若失败则降级读取 NDEF 消息或 Tag ID。此外，发送端在处于分享状态时通过 `NfcAdapter.enableForegroundDispatch()` 拦截本机收到的所有 NFC Intent，将其路由至自身 Activity 而非第三方应用，从而避免交通卡或门禁卡 App 被意外唤起。
 
-NFC 数据编码采用 NDEF 的 RTD_TEXT 记录格式，其解析遵循 NFC Forum 规范：第 1 字节为状态字节，低 6 位表示语言编码长度，后续为语言编码（如 "en"），剩余部分为 UTF-8 文本内容。这一帧结构和解析过程如 @fig-ndef-frame。
-
-#figure(
-  caption: [NDEF RTD_TEXT 帧结构与解码],
-  image("/assets/image-5.png")
-) <fig-ndef-frame>
+系统在 `AndroidManifest.xml` 中声明了 NFC 权限以及 NfcA、Ndef 和 NdefFormatable 三种技术筛选器，还注册了 `TECH_DISCOVERED` Intent Filter 用于处理其他 NFC 标签的被动唤醒。
 
 ```kotlin
-// NfcUtil.decodeRecordToText()
+// HCE APDU 处理 (ShareHceService.processCommandApdu)
+return when {
+    cla == 0x00 && ins == 0xA4 && p1 == 0x04 -> STATUS_SUCCESS // 9000
+    else -> sessionData + STATUS_SUCCESS                        // data + 9000
+}
+```
+
+NDEF RTD_TEXT 记录的解析在降级路径中仍被使用，其帧结构遵循 NFC Forum 规范：第 1 字节为状态字节，低 6 位表示语言编码长度，后续为语言编码（如 "en"），剩余部分为 UTF-8 文本内容。
+
+```kotlin
 val status = payload[0].toInt()
 val languageLength = status and 0x3F
 val textStart = 1 + languageLength
-payload.copyOfRange(textStart, payload.size)
-.toString(Charsets.UTF_8)
+payload.copyOfRange(textStart, payload.size).toString(Charsets.UTF_8)
 ```
 
 ==	BLE 蓝牙低功耗传输
 
-设备间 P2P 数据传输通过 BLE GATT（Generic Attribute Profile）协议实现。系统同时实现了 GATT Server（发送端）和 GATT Client（接收端）两个角色。GATT 服务使用两个特征值（Characteristic）：
-- *Read Characteristic*：携带分享数据（JSON 文本负载），由发送端的 GATT Server 暴露，接收端通过 `readCharacteristic()` 读取。
-- *Write Characteristic*：用于传输确认回执（ACK），接收端通过 `writeCharacteristic()` 写入，发送端的 GATT Server 通过 `onCharacteristicWriteRequest` 回调接收。
+设备间 P2P 数据传输通过 BLE GATT 协议实现，`BleShareTransport` 单例同时承担 GATT Server（发送端）和 GATT Client（接收端）两个角色。GATT 服务使用两个特征值，辅以一个 CCCD 描述符：数据通道采用 NOTIFY 特征值（UUID `87654321-4321-4321-4321-cba987654321`），发送端在收到接收端的 CCCD 订阅请求后，通过 `notifyCharacteristicChanged()` 逐片推送 JSON 负载，每片上限 500 字节且使用 Indication 模式（`confirm=true`）确保 ATT 层确认送达；回执通道采用 WRITE 特征值（UUID `11111111-2222-3333-4444-555555555555`），接收端导入完成后写入 `"ACK:{sessionId}"` 通知发送端。CCCD 描述符使用标准 UUID `00002902-0000-1000-8000-00805f9b34fb`。
 
-广播使用 `ADVERTISE_MODE_LOW_LATENCY` 模式确保发现速度，扫描使用 `SCAN_MODE_LOW_LATENCY`。为避免 BLE MTU 限制导致的过长数据截断，接收端在连接后请求 MTU 为 517 字节。
+接收端连接首先请求 MTU 为 517 字节以提高传输效率。双方均使用 `ADVERTISE_MODE_LOW_LATENCY` 和 `SCAN_MODE_LOW_LATENCY` 确保发现速度。发送端在 CCCD 写入事件后等待 300 毫秒给连接参数协商窗口，随后按 40 毫秒间隔逐片推送数据。首片在数据前附加 4 字节大端总长度，接收端据此判断何时达到完整数据量后拼接并解码。
 
 ==	Python Flask 后端
 
@@ -126,12 +122,11 @@ payload.copyOfRange(textStart, payload.size)
 - 支持游客模式（userId=0）与登录模式的数据隔离，切换账号后自动重新加载对应题库。
 - 云端 30 天墓碑清理机制，超过 30 天的软删除记录将被物理删除。
 
-==	NFC 碰一碰分享
+==	NFC + BLE P2P 分享
 
-用户可将错题通过 NFC + BLE 组合方式在设备间 P2P 分享：
-- 发送端在题目详情页点击分享，系统创建 `SharePayload` 数据包，通过 BLE 广播等待接收端连接。
-- 接收端通过 NFC 感应唤醒，自动启动 BLE 扫描，连接发送端读取数据，解析后逐条入库，并向发送端回传 ACK 确认。
-- 状态机管理发送分享的完整生命周期：Idle → WaitingAck → Completed/Error。
+用户可将错题通过 NFC + BLE 组合方式在设备间 P2P 分享，系统提供两种发送模式：NFC 碰触模式和广播模式。在 NFC 模式中发送端启用 HCE 卡模拟将 `sessionId` 暴露为虚拟 NFC 标签，接收端靠近时 Reader Mode 通过 IsoDep APDU 读取标识符，从而建立双向的身份锚定。广播模式则完全不依赖 NFC——发送端在 BLE Scan Response 中以厂商自定义数据（manufacturer-specific data，厂商 ID `0xFFFD`）携带 `sessionId` 的 16 字节原始 UUID，接收端扫描到广播后从 scan record 解码出会话标识。
+
+两种模式的后续流程完全一致。接收端获得 `sessionId` 后启动 BLE 连接，订阅 GATT 服务的 NOTIFY 特征值，发送端收到 CCCD 订阅后通过 `notifyCharacteristicChanged` 逐片推送 JSON payload，接收端累积拼接后被解码为 `SharePayload`。系统将 BLE 数据中的 `sessionId` 与发现阶段获取的标识符做精确比对，只有二者匹配才执行导入，不匹配则拒绝并展示错误信息。导入完成后接收端通过 WRITE 特征值回传 `"ACK:{sessionId}"` 确认，发送端收到即清理 HCE 和 BLE 广播，UI 更新为发送成功。发送端的分享状态由 `SenderShareState` 管理完整生命周期：Idle → WaitingAck → Completed 或 Error，接收端 UI 状态机覆盖 Idle、Detected、BroadcastDiscovering、Importing、Result 和 Error 六个状态。
 
 ==	二维码分享
 
@@ -182,7 +177,7 @@ payload.copyOfRange(textStart, payload.size)
   [`ui/focus/`], [AI 助手模块：`FocusScreen`（工具调用 AI 对话，约1015行）、`FocusViewModel`（骨架）],
   [`ui/qrcode/`], [二维码模块：`QrGenerateScreen`（生成）、`QrScanScreen`（扫描）],
   [`ui/review/`], [原“复习”模块：`ReviewScreen`（已被 qrcode 模块替代，仅作入口中转）、`ReviewViewModel`（骨架）],
-  [`utils/`], [通用工具：`AppMode`（DEV/PRE/REL）、`BleShareTransport`（BLE GATT 传输）、`NfcUtil`（NFC 状态管理）、`NfcShareCodec`（分享负载编解码）、`PermissionUtil`（BLE 权限）、`QrCodeUtil`（ZXing QR 编解码）],
+  [`utils/`], [通用工具：`AppMode`（DEV/PRE/REL）、`BleShareTransport`（BLE GATT NOTIFY 传输）、`NfcUtil`（NFC 状态管理）、`NfcShareCodec`（分享负载编解码）、`ShareHceService`（HCE 主机卡模拟）、`PermissionUtil`（BLE 权限）、`QrCodeUtil`（ZXing QR 编解码）],
   [`viewmodel/`], [`UserViewModel`：注册/登录/登出的认证 ViewModel],
   [`MyApplication.kt`], [Hilt Application 类，初始化 BLE，管理 AppMode 和 PRE 模式心跳/IP校验],
   [`MainActivity.kt`], [主 Activity，管理 NFC Reader Mode，处理 NFC Intent 分发],
@@ -477,206 +472,139 @@ private fun QuestionEntity.toSyncDto(): SyncQuestionDto = SyncQuestionDto(
 
 ==	NFC + BLE P2P 分享实现
 
-NFC 碰一碰分享是系统最具技术深度的功能之一，其完整交互涉及 NFC 标签读取、NDEF 文本解析、BLE GATT 双向通信、数据编解码和确认回执等多个环节。
+NFC + BLE P2P 分享是整个系统技术含量最高的功能之一。以下从设备发现、连接建立、数据传输、身份校验和确认回执五个阶段详细阐述其实现。
 
-===	整体流程
-
-#figure(
-  caption: [NFC + BLE 分享的完整交互流程],
-  image("/assets/image-3.png")
-)
-
-===	NFC 标签读取与 NDEF 编码
-
-NFC 使用 NDEF（NFC Data Exchange Format）协议进行数据传输。`NfcUtil.extractNfcTextPayload()` 方法从 Android Intent 中提取 NDEF 消息：
-
-```kotlin
-fun extractNfcTextPayload(intent: Intent?): String? {
-    if (intent == null) return null
-    // 只处理 NFC 相关 Intent 动作
-    val action = intent.action ?: return null
-    if (
-        action != NfcAdapter.ACTION_NDEF_DISCOVERED &&
-        action != NfcAdapter.ACTION_TAG_DISCOVERED &&
-        action != NfcAdapter.ACTION_TECH_DISCOVERED
-    ) return null
-
-    // 提取 NDEF 消息数组（兼容 API 33+ 的非废弃方法）
-    val rawMessages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES, Array<NdefMessage>::class.java)
-    } else {
-        intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES)
-    }
-    if (rawMessages != null) {
-        val messages = rawMessages.mapNotNull { it as? NdefMessage }
-        val firstRecord = messages.firstOrNull()?.records?.firstOrNull()
-        val textPayload = firstRecord?.let { decodeRecordToText(it) }
-        if (!textPayload.isNullOrBlank()) return textPayload
-    }
-    // 无 NDEF 文本时返回 Tag ID
-    // ...
-}
-```
-
-NDEF RTD_TEXT 记录的解析遵循 NFC Forum 规范，帧结构为 `[Status Byte | Language Code | Text Data]`：
-
-```kotlin
-private fun decodeRecordToText(record: NdefRecord): String? {
-    val payload = record.payload ?: return null
-    if (payload.isEmpty()) return null
-    return if (
-        record.tnf == NdefRecord.TNF_WELL_KNOWN &&
-        record.type.contentEquals(NdefRecord.RTD_TEXT)
-    ) {
-        val status = payload[0].toInt()
-        val languageLength = status and 0x3F      // 低6位为语言编码长度
-        val textStart = 1 + languageLength         // 跳过状态字节和语言编码
-        if (textStart >= payload.size) return null
-        payload.copyOfRange(textStart, payload.size).toString(Charsets.UTF_8)
-    } else {
-        payload.toString(Charsets.UTF_8)
-    }
-}
-```
-
-其中状态字节的定义：
-- Bit 7：编码指示（0=UTF-8，1=UTF-16）。
-- Bit 6：保留位，始终为 0。
-- Bit 5—0：语言编码长度（如 "en" 长度为 2）。
-
-===	BLE GATT 传输
-
-BLE 传输由 `BleShareTransport` 单例实现，同时承担 GATT Server（发送端）和 GATT Client（接收端）两个角色。定义了自定义的 GATT 服务 UUID 和特征值 UUID：
-
-#styled-parameter-table(
-  cols: (auto, auto, auto, auto),
-  [组件], [UUID], [方向], [说明],
-  [Service], [`12345678-1234-1234-
-  1234-123456789abc`], [—], [自定义 GATT 主服务],
-  [Read Char.], [`87654321-4321-4321-
-  4321-cba987654321`], [Server→Client], [承载分享数据（Read 属性）],
-  [Write Char.], [`11111111-2222-3333-
-  4444-555555555555`], [Client→Server], [承载 ACK 确认（Write 属性）],
-)
-
-发送端通过 `startAdvertising()` 启动广播：
-1. 创建 GATT 服务，包含 Read 特征值（`PROPERTY_READ`）和 Write 特征值（`PROPERTY_WRITE`）。
-2. 将分享数据写入 Read 特征值的 value 字段（UTF-8 编码的字节数组）。
-3. 使用 `BLUETOOTH_ADVERTISE` 和 `BLUETOOTH_CONNECT` 权限（Android 12+），`ADVERTISE_MODE_LOW_LATENCY` 广播模式。
-4. 通过 `BluetoothGattServerCallback.onCharacteristicReadRequest` 回复数据（支持偏移读取以应对大数据量），通过 `onCharacteristicWriteRequest` 接收 ACK。
-
-```kotlin
-val service = BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-val characteristic = BluetoothGattCharacteristic(
-    CHARACTERISTIC_UUID,
-    BluetoothGattCharacteristic.PROPERTY_READ,
-    BluetoothGattCharacteristic.PERMISSION_READ
-)
-val ackCharacteristic = BluetoothGattCharacteristic(
-    ACK_CHARACTERISTIC_UUID,
-    BluetoothGattCharacteristic.PROPERTY_WRITE or
-        BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
-    BluetoothGattCharacteristic.PERMISSION_WRITE
-)
-characteristic.value = data.toByteArray(Charsets.UTF_8)
-service.addCharacteristic(characteristic)
-service.addCharacteristic(ackCharacteristic)
-```
-
-接收端通过 `startScanning()` 进行扫描连接：
-1. 使用 `BLUETOOTH_SCAN` 和 `BLUETOOTH_CONNECT` 权限，`SCAN_MODE_LOW_LATENCY` 扫描模式。
-2. 在 `onScanResult` 回调中检查广播 Service UUID 匹配，优先匹配目标服务，4 秒后回退为广泛连接。
-3. 连接后请求 MTU 为 517 字节以提高传输效率，请求 `CONNECTION_PRIORITY_HIGH`。
-4. 通过 `discoverServices()` → `getCharacteristic()` → `readCharacteristic()` 读取数据。
-5. 读取成功后调用 `sendAck()` 通过 Write 特征值回传确认消息。
-
-ACk 消息的格式为 `ACK:{sessionId}`：
-
-```kotlin
-fun sendAck(sessionId: String, onComplete: ((Boolean) -> Unit)? = null): Boolean {
-    val gatt = currentGatt ?: return false
-    val characteristic = currentAckCharacteristic ?: return false
-    val payload = "$ACK_PREFIX$sessionId".toByteArray(Charsets.UTF_8)
-    // ...
-    gatt.writeCharacteristic(characteristic, payload, ...)
-}
-```
-
-===	导入流程状态管理
-
-NfcViewModel 通过 NFC 状态机管理接收端的完整导入生命周期，包含 5 个状态：
-
-```kotlin
-sealed interface NfcUiState {
-    data object Idle : NfcUiState
-    data class Detected(val payload: String, val eventId: Long) : NfcUiState
-    data class Importing(val payload: String, val eventId: Long, val preview: SharePreview?) : NfcUiState
-    data class Result(val message: String, val preview: SharePreview?) : NfcUiState
-    data class Error(val message: String) : NfcUiState
-}
-```
-
-状态转换流程为：
-1. *Idle → Detected*：收到 NFC `incomingPayload` 事件（经 800ms 去抖动）。
-2. *Detected → Importing*：用户确认导入，启动 BLE 扫描，设置 45 秒超时。
-3. *Importing → Importing（preview）*：BLE 连接成功、读取数据、解析预览信息。
-4. *Importing → Result*：逐条入库、发送 ACK 成功。
-5. *Importing → Error*：BLE 扫描超时、连接失败、Session ID 不匹配或 ACK 失败。
+NFC 碰触模式的完整交互流程如 @fig-intercom-seq-nfc 所示，广播模式的完整交替流程如 @fig-intercom-seq-broadcast 所示，两者的 NOTIFY 推送、校验和 ACK 阶段完全一致，仅在发现阶段不同。
 
 #figure(
-  caption: [NfcViewModel 导入流程状态机],
-  image("/assets/image-6.png")
-)
+  caption: [NFC 碰触模式完整交互流程],
+  image("/assets/intercom-sequence-nfc.png", width: 70%)
+) <fig-intercom-seq-nfc>
 
-===	AndroidManifest NFC 与 BLE 声明
+===	设备发现阶段
 
-系统在 `AndroidManifest.xml` 中进行了完整的 NFC 和 BLE 权限声明：
+发送端在题目详情页点击「分享」时，弹出模式选择对话框，提供两种发现方式。在 NFC 碰触模式中，系统继承 Android 的 `HostApduService` 实现了一个 HCE 服务。该服务注册在 AID `F05A4C4541524E` 下，类别设为 `"other"` 以避开支付类应用的路由优先。当接收端以 Reader Mode 靠近时，主动发送 SELECT APDU 命令选定该 AID，HCE 服务返回状态字 9000 确认；随后接收端发送 READ BINARY APDU，HCE 服务将当前 `sessionId` 的 UTF-8 字节连同 9000 一并返回。读卡器模式启用全部五种 NFC 技术类型以及 `FLAG_READER_SKIP_NDEF_CHECK`，在回调中优先以 `IsoDep.get(tag)` 尝试 HCE 路径，失败后降级读取 NDEF 或 Tag ID。
 
-NFC 技术筛选器声明了三种支持的标签技术：
+在广播模式中，发送端不启用 HCE，而是在 BLE Scan Response 中嵌入 16 字节厂商自定义数据（类型 `0xFF`、厂商 ID `0xFFFD`、负载为 `sessionId` 原始 UUID）。接收端通过 `startBroadcastScan()` 扫描所有广播 `SERVICE_UUID` 的设备，从 `scanRecord.getManufacturerSpecificData(0xFFFD)` 中解码出会话标识，以列表形式展示设备名称和就绪状态供用户手动选择。广播模式的完整流程如 @fig-intercom-seq-broadcast 所示。
 
-```xml
-<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-    <tech-list>
-        <tech>android.nfc.tech.Ndef</tech>
-    </tech-list>
-    <tech-list>
-        <tech>android.nfc.tech.NdefFormatable</tech>
-    </tech-list>
-    <tech-list>
-        <tech>android.nfc.tech.NfcA</tech>
-    </tech-list>
-</resources>
+#figure(
+  caption: [广播模式完整交互流程],
+  image("/assets/intercom-sequence-broadcast.png", width: 60%)
+) <fig-intercom-seq-broadcast>
+
+GATT 服务的创建代码如下，包含 NOTIFY 特征值及其 CCCD 描述符，以及 WRITE 特征值：
+
+```kotlin
+val service = BluetoothGattService(SERVICE_UUID, SERVICE_TYPE_PRIMARY)
+val notifyChar = BluetoothGattCharacteristic(
+    CHAR_NOTIFY_UUID, PROPERTY_NOTIFY, 0)
+val cccd = BluetoothGattDescriptor(
+    CCCD_UUID, PERMISSION_READ or PERMISSION_WRITE)
+notifyChar.addDescriptor(cccd)
+service.addCharacteristic(notifyChar)
+val ackChar = BluetoothGattCharacteristic(
+    ACK_CHARACTERISTIC_UUID, PROPERTY_WRITE or PROPERTY_WRITE_NO_RESPONSE,
+    PERMISSION_WRITE)
+service.addCharacteristic(ackChar)
+gattServer?.addService(service)
 ```
 
-Activity 注册了 NFC Intent 过滤器，监听自定义 MIME 类型：
+===	连接建立与通知订阅
+
+接收端无论通过 NFC 还是广播模式获得 `sessionId` 后，均执行相同的 BLE 连接流程。连接使用 `connectGatt()` 并指定 `autoConnect=false`，连接后立即请求 `CONNECTION_PRIORITY_HIGH` 和 MTU 517。MTU 协商完成后调用 `discoverServices()` 发现 GATT 服务结构，找到 NOTIFY 特征值后调用 `setCharacteristicNotification(notifyChar, true)` 注册应用层回调，然后将 `ENABLE_NOTIFICATION_VALUE`（`[0x01, 0x00]`）写入 CCCD 描述符以启用链路层通知。发送端的 GATT Server 在 `onDescriptorWriteRequest` 回调中检测到 CCCD 写入，延迟 300 毫秒等待连接参数协商稳定，随后开始推送数据。
+
+===	数据传输与分片协议
+
+发送端通过 `notifyCharacteristicChanged(device, characteristic, confirm=true)` 以 Indication 模式推送数据。Indication 区别于普通 Notification 之处在于它要求 ATT 层确认，这对部分手机 BLE 芯片的固件可靠性至关重要——实测中发现部分 BLE 芯片对 Notification 只在队列中接受但未实际发射，切换为 Indication 后问题消除。分片协议的首片格式为 `[4 字节 BigEndian 总长度] + [数据 bytes 0..N]`，后续各片仅含数据本身。每片上限 500 字节，片间间隔 40 毫秒。接收端在 `onCharacteristicChanged` 中累积数据，当累积量达到首片声明的总长度后，将全部字节拼接为 UTF-8 字符串，交由上层解码。
+
+NOTIFY 分片的首片前 4 字节以大端序声明数据总长度，接收端据此判断何时收集完所有片段。首片和后续片的帧布局如下表所示。每片上限 `min(MTU-3, 500)` = 500 字节，片间间隔 40ms。
+
+#table(
+  columns: 2,
+  align: (left, left),
+  table.header[偏移][内容],
+  [首片 Bytes 0—3], [总长度，BigEndian Int32，例如 `0x00 00 04 25` → 1061 bytes],
+  [首片 Bytes 4—N], [UTF-8 JSON 正文首段负载],
+  [后续片 Bytes 0—N], [UTF-8 JSON 正文续段负载],
+)
+
+NFC 模式中 HCE 通信使用 ISO 7816-4 APDU 协议。SELECT 命令和 READ BINARY 命令的帧格式如下。
+
+#align(center)[
+#table(
+  columns: 7,
+  align: center,
+  table.header[CLA][INS][P1][P2][Lc][AID][Le],
+  [`00`],[`A4`],[`04`],[`00`],[`07`],[`F0 5A 4C`\ `45 41 52 4E`],[`00`],
+//   caption: [SELECT APDU 帧（接收端 → HCE），响应 `90 00`],
+)
+]
+
+#align(center)[
+#table(
+  columns: 5,
+  align: center,
+  table.header[CLA][INS][P1][P2][Le],
+  [`00`],[`B0`],[`00`],[`00`],[`00`],
+//   caption: [READ BINARY APDU 帧（接收端 → HCE），响应 `<sessionId UTF-8 bytes> 90 00`],
+)
+]
+
+广播模式中 sessionId 通过 BLE Scan Response 的厂商自定义数据字段传递，帧格式如下。
+
+#align(center)[
+#table(
+  columns: 4,
+  align: center,
+  table.header[AD Type][Length][Company ID][Data],
+  [`0xFF`],[`0x12`],[`0xFFFD`],[sessionId raw UUID (16 bytes)],
+//   caption: [Scan Response Manufacturer Specific Data 帧，接收端通过 `scanRecord.getManufacturerSpecificData(0xFFFD)` 解码],
+)
+]
+
+===	校验与导入
+
+接收端收到完整数据后调用 `NfcShareCodec.decode(data)` 解码 JSON 为 `SharePayload` 对象。该校验步骤是整个协议的安全锚点——系统将解码后的 `payload.sessionId` 与发现阶段获取的会话标识（NFC 模式下为 HCE 返回的字符串，广播模式下为 Scan Response 中解码的 UUID）做精确字符串比对。若 NFC 检测到的 payload 并非合法 UUID 格式（例如因安全元件交通卡干扰而读到了非预期的卡片数据），则接收端 UI 不显示确认导入按钮，改为提示用户更换轻触位置。校验通过后将各条 `ShareItem` 逐一构建为 `QuestionEntity` 并写入 Room 数据库。
+
+确保校验逻辑严格的代码核心如下：
+
+```kotlin
+if (payload != null && isValidUuid(current.payload)
+    && payload.sessionId == current.payload) {
+    // 导入
+}
+```
+
+===	确认回执与状态管理
+
+导入完成后接收端调用 `BleShareTransport.sendAck()` 将字符串 `"ACK:{sessionId}"` 写入 WRITE 特征值。发送端 GATT Server 的 `onCharacteristicWriteRequest` 检测到 ACK 前缀后触发 `onAckReceived` 回调，发送端 UI 随之切换为"发送完成"状态，并清理 HCE 和 BLE 广播。发送端状态由 `NfcUtil.SenderShareState` 密封接口管理，接收端状态由 `NfcViewModel` 中 `NfcUiState` 状态机驱动，整个导入设置 45 秒超时保护以防止异常情况下的资源泄漏。接收端状态机的完整转换关系如 @fig-intercom-state 所示。
+
+#figure(
+  caption: [接收端 UI 状态机 — NfcUiState],
+  image("/assets/image-12.png", width: 100%)
+) <fig-intercom-state>
+
+
+===	AndroidManifest 声明
+
+`MainActivity` 注册了 `NDEF_DISCOVERED` 和 `TECH_DISCOVERED` 两个 NFC Intent Filter，并引用 `nfc_tech_filter.xml` 声明支持的标签技术。同时注册了 `ShareHceService` 作为 HCE 主机卡模拟服务。BLE 权限针对 Android 12 及以上版本使用 `BLUETOOTH_ADVERTISE`、`BLUETOOTH_CONNECT` 和 `BLUETOOTH_SCAN` 三个细粒度权限，其中 `BLUETOOTH_SCAN` 标注 `neverForLocation` 以声明不使用 BLE 获取位置信息。
 
 ```xml
-<activity
-    android:name=".MainActivity"
-    android:launchMode="singleTop">
+<service android:name=".utils.ShareHceService" android:exported="true"
+    android:permission="android.permission.BIND_NFC_SERVICE">
     <intent-filter>
-        <action android:name="android.nfc.action.NDEF_DISCOVERED" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <data android:mimeType="application/vnd.com.zlearn.wrongbook-share" />
+        <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
     </intent-filter>
-</activity>
+    <meta-data android:name="android.nfc.cardemulation.host_apdu_service"
+        android:resource="@xml/aid_filter" />
+</service>
 ```
 
-BLE 权限针对不同 API 级别做出了兼容性处理：
+===	设计决策与已知限制
 
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<!-- Android 12+ 不再需要位置权限进行 BLE 扫描 -->
-<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-    android:usesPermissionFlags="neverForLocation"
-    tools:targetApi="s" />
-<!-- 旧版本兼容：位置权限用于 BLE 扫描 -->
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-```
+系统经历了多次传输层迭代才定型为当前的 NOTIFY 模式。最初使用单个 READ 特征值承载完整 JSON，但由于 Android native BLE 层对 `characteristic.value` 存在设备相关的属性值上限（约 600 字节），超出部分被静默丢弃，导致 JSON 截断。随后尝试将数据拆分为三个独立的 READ 特征值以绕过单特征值容量限制，但 BLE Long Read 在部分设备上仅支持两次读取（一次 Read Request 加一次 Read Blob Request），且 GATT 缓存机制在多特征值场景下存在 stale cache 问题。最终的 NOTIFY 方案彻底消除了上述限制——数据由发送端主动推送，容量理论上无上限，且避免了 GATT 缓存的复杂性。
+
+对于安全元件（SE）交通卡与 HCE 的硬件路由优先级冲突，这是一个 NFC 控制器层面的硬件行为，Android 不提供 API 覆盖 SE 路由。系统的应对策略是在接收端检测非 UUID 格式的 payload 时拒绝导入并引导用户更换轻触位置，同时以广播模式作为纯 BLE 备选路径。
 
 ==	二维码分享实现
 
@@ -1230,9 +1158,9 @@ buildTypes {
     image("/assets/image-10.png",width: 5cm)
 )
 ]
-=== NFC碰传页面
+=== 互传页面
 
-接收状态（左图）和发送状态（右图）。
+接收端可同时使用 NFC 碰触或广播搜索两种方式（左图），发送端显示等待状态（右图）。
 
 #align(center)[
 #grid(
@@ -1261,12 +1189,9 @@ buildTypes {
 
 本系统在当前版本（v1.5）基础上，存在以下可扩展方向：
 
-==	NFC 分享扩展
+==	互传功能扩展
 
-当前 NFC 分享只在发送端写入会话 ID 到 NFC 标签，完整数据通过 BLE 传输。未来可支持：
-- 直接通过 NFC 标签携带完整的题目 JSON 数据（利用 NDEF 记录的大容量 NdefMessage），在无蓝牙的简化场景下完成纯 NFC 传输。
-- 批量 NFC 分享，一次性传输多道题目。
-- 分享加密，在 `SharePayload` 中增加签名字段，使用非对称加密确保传输数据不被篡改。
+当前互传功能采用 HCE + BLE NOTIFY 架构完成 NFC 模式设备发现和全速数据传输，同时以 BLE Scan Response 携带 sessionId 的广播模式作为纯 BLE 备选方案。未来可支持分享加密，在 `SharePayload` 中增加签名字段，使用非对称加密确保传输数据不被篡改；也可考虑 Wi-Fi Direct 通道作为更大数据量场景下的备选传输路径。
 
 ==	云端功能增强
 
@@ -1309,7 +1234,7 @@ buildTypes {
 
 服务端虽然使用了较简单的 Flask + SQLite 方案，但双向增量同步的设计充满工程挑战：版本冲突的"最后写入胜出"策略、游标分页的正确实现、墓碑记录的定期清理等，每一个细节都直接影响用户体验的正确性和流畅性。
 
-NFC + BLE 的组合分享是系统技术含量最高的功能。NFC Forum 的 NDEF 规范定义了精确的字节级帧结构（状态字节 + 语言编码 + 文本负载），BLE GATT 协议定义了设备间服务的发现和特征值读写交互。将这两者结合起来，实现从用户"碰一下"的物理交互到数据完整入库的端到端流程，再辅以 ACK 回执确认，构成了一个完整的近场 P2P 传输方案。
+NFC + BLE 的组合分享是系统技术含量最高的功能。在 NFC 模式下，HCE 卡模拟技术在 ISO 7816-4 APDU 层面实现会话身份交换，BLE GATT NOTIFY 推送 + Indication 确认机制提供了可靠的大数据通道，sessionId 的端到端校验串起了物理碰触与数据导入之间的信任链。经历了从 READ 特征值到多特征值分片再到 NOTIFY 推送的三次传输层迭代，并解决了部分手机 BLE 芯片通知静默丢失、SE 交通卡硬件路由抢占等一系列平台特有的工程问题，最终形成了一个稳定且支持双模式备选的设备间 P2P 传输方案。
 
 AI 集成是本系统区别于传统笔记应用的核心竞争力。阿里云 DashScope 的大模型能力通过 SSE 流式输出提供了接近 ChatGPT 的实时对话体验，而 FocusScreen 中的工具调用协议更是让 AI 从单纯的聊天机器人进化为能够直接操作本地数据库的智能助手，这种 AI Agent 的设计思路在当前业界也属于前沿方向。
 
