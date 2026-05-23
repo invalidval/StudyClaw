@@ -64,35 +64,35 @@
 
   ]
 
-  // 二级标题样式
-  show heading.where(level: 2): it => [
-    #align(left)[
-      #par(first-line-indent: (amount:0em,all:true))[
-        #text(font: ("Calibri", "SimSun"), size: 16pt, weight: "bold")[
-          #if it.numbering != none {
-            let nums = counter(heading).at(it.location())
-            numbering("1 ", nums.at(1))
-          }
-          #it.body
-        ]
+  // 二级标题样式 (1, 2, 3...)
+show heading.where(level: 2): it => [
+  #align(left)[
+    #par(first-line-indent: (amount: 0em, all: true))[
+      #text(font: ("Calibri", "SimSun"), size: 16pt, weight: "bold")[
+        #if it.numbering != none {
+          let nums = counter(heading).at(it.location())
+          numbering("1.1", nums.at(0), nums.at(1))  // 传入两个数字
+        }
+        #it.body
       ]
     ]
   ]
+]
 
-  // 三级标题样式
-  show heading.where(level: 3): it => [
-    #align(left)[
-      #par(first-line-indent: (amount:0em,all:true))[
-        #text(font: ("Calibri", "SimSun"), size: 12pt, weight: "bold")[
-          #if it.numbering != none {
-            let nums = counter(heading).at(it.location())
-            numbering("1.1 ", nums.at(1), nums.at(2))
-          }
-          #it.body
-        ]
+// 三级标题样式 (1.1.1, 1.1.2...)
+show heading.where(level: 3): it => [
+  #align(left)[
+    #par(first-line-indent: (amount: 0em, all: true))[
+      #text(font: ("Calibri", "SimSun"), size: 12pt, weight: "bold")[
+        #if it.numbering != none {
+          let nums = counter(heading).at(it.location())
+          numbering("1.1.1", nums.at(0), nums.at(1), nums.at(2))  // 传入三个数字
+        }
+        #it.body
       ]
     ]
   ]
+]
 
   // 代码标题样式
   let code-with-lines(code, lang: none) = {
@@ -135,14 +135,14 @@
 
   table(
     columns: default-cols,
-    stroke: (x, y) => 0.6pt + rgb("#b7c3d0"),
+    stroke: (x, y) => 0.6pt + rgb("#828b95"),
     fill: (x, y) => {
       if y == 0 {
-        rgb("#366d98")
+        rgb("#f2f2f2")
       } else if calc.odd(y) {
         white
       } else {
-        rgb("#edf2f8")
+        rgb("#f2f2f2")
       }
     },
     align: (x, y) => {

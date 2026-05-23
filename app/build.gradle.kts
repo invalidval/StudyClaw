@@ -38,7 +38,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 默认开发环境配置
-        buildConfigField("String", "BASE_URL", "\"http://10.129.215.233:8080/\"")
+        buildConfigField("String", "BASE_URL", "\"http://10.129.0.216:8080/\"")
         buildConfigField("String", "ALIYUN_API_KEY", "\"sk-cec6e41f863145f895f0d9c563b08ffe\"")
     }
 

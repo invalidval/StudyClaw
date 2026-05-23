@@ -88,6 +88,7 @@ payload.copyOfRange(textStart, payload.size).toString(Charsets.UTF_8)
 
 二维码的生成与扫描使用 ZXing 库，生成端通过 `com.google.zxing` 核心库编码，扫描端通过 `zxing-android-embedded` 封装库提供相机扫码界面。所有 QR 数据均采用 UTF-8 字符集编码。
 
+#pagebreak()
 
 =	系统功能需求
 
@@ -141,6 +142,7 @@ payload.copyOfRange(textStart, payload.size).toString(Charsets.UTF_8)
 - 认证采用 Token 格式 `token_{user_id}`，每次请求通过 HTTP Authorization 头携带。
 - 游客模式允许不登录使用全部功能，但数据不与云端关联。
 
+#pagebreak()
 
 =	系统设计与实现
 
@@ -515,9 +517,11 @@ gattServer?.addService(service)
 
 ===	数据传输与分片协议
 
-发送端通过 `notifyCharacteristicChanged(device, characteristic, confirm=true)` 以 Indication 模式推送数据。Indication 区别于普通 Notification 之处在于它要求 ATT 层确认，这对部分手机 BLE 芯片的固件可靠性至关重要——实测中发现部分 BLE 芯片对 Notification 只在队列中接受但未实际发射，切换为 Indication 后问题消除。分片协议的首片格式为 `[4 字节 BigEndian 总长度] + [数据 bytes 0..N]`，后续各片仅含数据本身。每片上限 500 字节，片间间隔 40 毫秒。接收端在 `onCharacteristicChanged` 中累积数据，当累积量达到首片声明的总长度后，将全部字节拼接为 UTF-8 字符串，交由上层解码。
+发送端通过 `notifyCharacteristicChanged(device, characteristic, confirm=true)` 以 Indication 模式推送数据。Indication 区别于普通 Notification 之处在于它要求 ATT 层确认，这对部分手机 BLE 芯片的固件可靠性至关重要——实测中发现部分 BLE 芯片对 Notification 只在队列中接受但未实际发射，切换为 Indication 后问题消除。
 
-NOTIFY 分片的首片前 4 字节以大端序声明数据总长度，接收端据此判断何时收集完所有片段。首片和后续片的帧布局如下表所示。每片上限 `min(MTU-3, 500)` = 500 字节，片间间隔 40ms。
+分片协议的首片格式为 `[4 字节 BigEndian 总长度] + [数据 bytes 0..N]`，后续各片仅含数据本身。每片上限 500 字节，片间间隔 40 毫秒。接收端在 `onCharacteristicChanged` 中累积数据，当累积量达到首片声明的总长度后，将全部字节拼接为 UTF-8 字符串，交由上层解码。
+
+NOTIFY 分片的首片前 4 字节以大端序声明数据总长度，接收端据此判断何时收集完所有片段。首片和后续片的帧布局如下表所示：
 
 #table(
   columns: 2,
@@ -528,7 +532,13 @@ NOTIFY 分片的首片前 4 字节以大端序声明数据总长度，接收端�
   [后续片 Bytes 0—N], [UTF-8 JSON 正文续段负载],
 )
 
-NFC 模式中 HCE 通信使用 ISO 7816-4 APDU 协议。SELECT 命令和 READ BINARY 命令的帧格式如下。
+总长度字段取 4 字节而非变长编码，出于三点考虑：
+
+首先 4 字节是 BLE 栈中一次 `readInt` 调用即可完成的原子解析，无需处理变长标记位；其次 32 位足以表示最大约 4 GB 的数据量，远超本场景下单道题目的 JSON 负载（通常 1--2 KB），不存在溢出风险；最后大端序是二进制网络协议的事实标准，BLE ATT 层本身也使用大端序编码多字节属性句柄，保持一致可避免端序转换的认知负担。
+
+片大小上限取 `min(MTU-3, 500)` 而非严格等于 `MTU-3`，是因为实测中发现部分 Android 设备的 `notifyCharacteristicChanged` 对参数大小有独立于 MTU 的硬上限（约 500--512 字节），取 500 字节可在所有测试设备上稳定工作。片间 40 毫秒间隔是在发送端 Binder 线程上用 `Thread.sleep(40)` 实现的简单流控，连接间隔默认为 30~50 毫秒，40 毫秒间隔能确保 ATT 层的 Indication 确认包有足够时间返回，避免因未确认的 Indication 堆积触达 BLE 芯片内部队列上限。
+
+NFC 模式中 HCE 通信使用 ISO 7816-4 APDU 协议。SELECT 命令和 READ BINARY 命令的帧格式如下：
 
 #align(center)[
 #table(
@@ -536,9 +546,10 @@ NFC 模式中 HCE 通信使用 ISO 7816-4 APDU 协议。SELECT 命令和 READ BI
   align: center,
   table.header[CLA][INS][P1][P2][Lc][AID][Le],
   [`00`],[`A4`],[`04`],[`00`],[`07`],[`F0 5A 4C`\ `45 41 52 4E`],[`00`],
-//   caption: [SELECT APDU 帧（接收端 → HCE），响应 `90 00`],
 )
 ]
+
+SELECT 命令的 `P1=04` 表示按 AID 完整名称选择（区别于按部分名称或 DF 名的 `P1=00` 或 `P1=01`），`Lc=07` 对应 7 字节的 AID 长度，`Le=00` 表示期望返回不超过 256 字节的响应（实际仅返回 2 字节状态字 9000）。AID 取 `F05A4C4541524E` 的前缀 `F0` 属于 ISO 7816-5 中定义的专有应用类别（不与国际注册 AID 冲突），后续 6 字节 `5A 4C 45 41 52 4E` 为项目名称 "ZLEARN" 的 ASCII 编码，总长 7 字节恰好位于 AID 规范允许的 5--16 字节范围内。类别设为 `"other"` 而非 `"payment"`，避免与系统默认支付应用产生路由优先级冲突。
 
 #align(center)[
 #table(
@@ -546,11 +557,12 @@ NFC 模式中 HCE 通信使用 ISO 7816-4 APDU 协议。SELECT 命令和 READ BI
   align: center,
   table.header[CLA][INS][P1][P2][Le],
   [`00`],[`B0`],[`00`],[`00`],[`00`],
-//   caption: [READ BINARY APDU 帧（接收端 → HCE），响应 `<sessionId UTF-8 bytes> 90 00`],
 )
 ]
 
-广播模式中 sessionId 通过 BLE Scan Response 的厂商自定义数据字段传递，帧格式如下。
+READ BINARY 采用 `INS=B0`、偏移参数 `P1=00, P2=00` 从当前已选定文件的第 0 字节开始连续读取，`Le=00` 请求最大 256 字节响应（实际返回 sessionId 的 UTF-8 字节加上 2 字节状态字）。表 4 中的状态字 `9000` 为 ISO 7816 标准中"正常完成"的统一定义，`6A82` 为"文件未找到"，当 HCE 服务未设置会话数据时返回此值使系统回退至其他 HCE 服务。
+
+广播模式中 sessionId 通过 BLE Scan Response 的厂商自定义数据字段传递，帧格式如下：
 
 #align(center)[
 #table(
@@ -558,20 +570,111 @@ NFC 模式中 HCE 通信使用 ISO 7816-4 APDU 协议。SELECT 命令和 READ BI
   align: center,
   table.header[AD Type][Length][Company ID][Data],
   [`0xFF`],[`0x12`],[`0xFFFD`],[sessionId raw UUID (16 bytes)],
-//   caption: [Scan Response Manufacturer Specific Data 帧，接收端通过 `scanRecord.getManufacturerSpecificData(0xFFFD)` 解码],
 )
 ]
 
-===	校验与导入
+AD Type `0xFF` 为 BLE 广播数据规范中"Manufacturer Specific Data"类型的标准编码。Company ID `0xFFFD` 是一个保留供测试使用的厂商标识符，正式产品化时应向 Bluetooth SIG 申请正式 Company ID。Data 字段的 16 字节由一个 `java.util.UUID` 对象通过 `ByteBuffer` 写入其 `mostSignificantBits` 和 `leastSignificantBits` 两个 64 位长整型而来，与 UUID 标准内部表示一一对应，接收端逆向解析时只需从字节序还原 UUID 对象再调用 `.toString()` 即可恢复为 36 字符的连字符分隔格式。选择将 sessionId 放在 Scan Response 而非 Advertising Data 中，是因为标准 BLE 广播的有效载荷仅约 31 字节（`ADVERTISE_MODE_LOW_LATENCY`），已被 Flags（3 字节）和 128-bit Service UUID（18 字节）占用 21 字节，剩余 10 字节不足以容纳 16 字节的 UUID。Scan Response 由客户端主动 scan 时请求，可提供额外 31 字节空间，20 字节的 manufacturer-specific data 完全适配。
 
-接收端收到完整数据后调用 `NfcShareCodec.decode(data)` 解码 JSON 为 `SharePayload` 对象。该校验步骤是整个协议的安全锚点——系统将解码后的 `payload.sessionId` 与发现阶段获取的会话标识（NFC 模式下为 HCE 返回的字符串，广播模式下为 Scan Response 中解码的 UUID）做精确字符串比对。若 NFC 检测到的 payload 并非合法 UUID 格式（例如因安全元件交通卡干扰而读到了非预期的卡片数据），则接收端 UI 不显示确认导入按钮，改为提示用户更换轻触位置。校验通过后将各条 `ShareItem` 逐一构建为 `QuestionEntity` 并写入 Room 数据库。
+===	NOTIFY 推送与接收源码
 
-确保校验逻辑严格的代码核心如下：
+发送端 NOTIFY 分片推送由 `BleShareTransport.startNotifyPush()` 实现。该函数在收到 CCCD 订阅后于 Binder 线程中调用，`notifyData` 持有完整的 UTF-8 JSON 字节数组，`serverMtu` 为协商后的 ATT MTU。首先计算分片大小 `maxChunkSize`，上限 500 字节以保证兼容性，再等待 300 毫秒让连接参数协商稳定，随后构造首片并填充大端序总长度，最后循环发送剩余数据片，每片间隔 40 毫秒。`writeIntBE` 为大端序 32 位写入辅助方法。
 
 ```kotlin
-if (payload != null && isValidUuid(current.payload)
-    && payload.sessionId == current.payload) {
-    // 导入
+private fun startNotifyPush(device: BluetoothDevice, characteristic: BluetoothGattCharacteristic) {
+    val data = notifyData ?: return                  // 待推送的完整 payload 字节数组
+    if (isSendingNotify) return                      // 防重入标志
+    isSendingNotify = true
+
+    try {
+        Thread.sleep(300)                            // 等待 BLE 连接参数协商
+
+        val maxChunkSize = minOf(
+            (serverMtu - 3).coerceAtLeast(20), 500   // 片大小: MTU−3 且 ≤ 500
+
+        val firstDataLen = minOf(maxChunkSize - 4, data.size)
+        val firstChunk = ByteArray(4 + firstDataLen)
+        writeIntBE(firstChunk, 0, data.size)         // 前 4 字节写入大端总长度
+        System.arraycopy(data, 0, firstChunk, 4, firstDataLen)
+
+        characteristic.value = firstChunk            // 设置特征值
+        var ok = gattServer?.notifyCharacteristicChanged(
+            device, characteristic, true) ?: false   // Indication 推送首片
+        if (!ok) return
+
+        var offset = firstDataLen
+        while (offset < data.size) {                 // 循环推送后续片
+            Thread.sleep(40)
+            val end = minOf(offset + maxChunkSize, data.size)
+            val chunk = data.copyOfRange(offset, end)
+            characteristic.value = chunk
+            ok = gattServer?.notifyCharacteristicChanged(
+                device, characteristic, true) ?: false
+            if (!ok) break
+            offset = end
+        }
+    } finally { isSendingNotify = false }
+}
+
+private fun writeIntBE(buf: ByteArray, off: Int, v: Int) {
+    buf[off]     = ((v shr 24) and 0xFF).toByte()    // 大端序: 高字节在前
+    buf[off + 1] = ((v shr 16) and 0xFF).toByte()
+    buf[off + 2] = ((v shr 8)  and 0xFF).toByte()
+    buf[off + 3] = (v and 0xFF).toByte()
+}
+```
+
+接收端 `onCharacteristicChanged` 回调累积各片数据。`notifyTotalSize` 初始为 $-1$，首片到达时从前 4 字节解析出数据总长度（大端序）并初始化 `notifyAccumulator`，后续片追加到 accumulator 末尾。当累积量达到总长度时完成收集，转为 UTF-8 字符串后触发 `onDataReceived` 回调。
+
+```kotlin
+// 全局累积状态
+private var notifyAccumulator = ByteArray(0)          // 累积字节缓冲区
+private var notifyTotalSize = -1                      // 数据总长度, −1 表示尚未收到首片
+
+override fun onCharacteristicChanged(
+    gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray
+) {
+    if (notifyTotalSize == -1 && value.size >= 4) {   // 首片到达
+        notifyTotalSize =
+            (value[0].toInt() and 0xFF shl 24) or     // 大端序解析 4 字节总长度
+            (value[1].toInt() and 0xFF shl 16) or
+            (value[2].toInt() and 0xFF shl 8) or
+            (value[3].toInt() and 0xFF)
+        notifyAccumulator = value.copyOfRange(4, value.size)
+    } else {
+        notifyAccumulator += value                     // 后续片追加
+    }
+    if (notifyTotalSize > 0 &&
+        notifyAccumulator.size >= notifyTotalSize) {   // 收集完毕
+        val data = String(notifyAccumulator, Charsets.UTF_8)
+        onDataReceived?.invoke(data)                   // 触发上层回调
+    }
+}
+```
+
+===	校验与导入
+
+接收端收到完整数据后调用 `NfcShareCodec.decode(data)` 解码 JSON 为 `SharePayload`。该校验步骤是整个协议的安全锚点——系统将解码后的 `payload.sessionId` 与发现阶段获取的会话标识做精确字符串比对。核心校验逻辑如下，`current.payload` 为 NFC 或广播阶段获取的会话 ID，仅在同时满足三个条件时才执行导入：BLE 数据解码成功、NFC 会话标识为合法 UUID 格式、双方 sessionId 精确匹配。
+
+```kotlin
+val payload = NfcShareCodec.decode(data).getOrNull()
+val bleSessionId = payload?.sessionId
+val isValidSession = isValidUuid(current.payload)  // 仅 UUID 格式才校验
+val sessionMatch = payload != null && payload.sessionId == current.payload
+
+if (payload != null && isValidSession && sessionMatch) {
+    for (item in payload.items) {
+        // 逐条构建 QuestionEntity 并写入 Room 数据库
+        useCases.addQuestion(QuestionEntity(
+            ocrText = item.ocrText, summary = item.summary,
+            subject = item.subject, difficulty = item.difficulty,
+            aiAnalysis = item.aiAnalysis,
+            isArchived = item.isArchived, archiveType = item.archiveType
+        ))
+    }
+    BleShareTransport.sendAck(payload.sessionId)  // 回传 ACK
+} else {
+    // 校验失败: 拒绝导入, 显示错误信息
+    BleShareTransport.stopScanning()
 }
 ```
 
@@ -1075,7 +1178,7 @@ buildTypes {
     }
 }
 ```
-
+#pagebreak()
 =   系统运行截图
 
 通过数据线将手机（Android 15.0）连接到电脑，在Android Studio中将APP运行在实体机上。
@@ -1147,9 +1250,29 @@ buildTypes {
 )
 ]
 
+点击题库中的题目可以查看详情、与大模型问答和分享：
+#align(center)[
+#grid(
+    column-gutter: 0.5cm,
+    columns: 2,
+    image("/assets/df2c13a540a92e4eb8021b1ec6cc2b01.jpg",width: 5cm),
+    
+    image("/assets/87911d309f7fcacefe74038a485c4aaa.jpg",width: 5cm)
+)
+]
+
+
 === 二维码分享页面
 
-从此处可以跳转到题库进行二维码生成，也可以打开摄像机扫码。
+从题目详情页点击“生成二维码”会显示二维码，用户可以截图保存：
+#align(center)[
+#grid(
+    column-gutter: 0.5cm,
+    columns: 2,
+    image("/assets/a13b7c273106e87836cedf2d5bb5eec3.jpg",width: 5cm)
+)
+]
+在二维码页面，点击“扫码导入”可以打开摄像机扫码，或从相册选择：
 #align(center)[
 #grid(
     column-gutter: 0.5cm,
@@ -1158,7 +1281,19 @@ buildTypes {
     image("/assets/image-10.png",width: 5cm)
 )
 ]
+
+下图中右侧手机扫描左侧二维码，会弹出题目详情，可以选择加入题库：
+
+#align(center)[
+    #image("/assets/image-13.png",width: 80%)
+]
 === 互传页面
+
+发送方在题目详情页可选择使用“广播模式”或“NFC模式”分享题目：
+#align(center)[
+    #image("/assets/c38c010e28a6b44ae36ddc0812194423.jpg",width: 30%)
+]
+
 
 接收端可同时使用 NFC 碰触或广播搜索两种方式（左图），发送端显示等待状态（右图）。
 
@@ -1166,11 +1301,28 @@ buildTypes {
 #grid(
     column-gutter: 0.5cm,
     columns: 2,
-    image("/assets/68c5bce28f7fee48736de7f90dace2ed.jpg",width: 5cm),
+    image("/assets/3dd57766dbee1dcff437e271db9496ea.jpg",width: 5cm),
     image("/assets/e807a1b3c091f25f42e7a08fc4ab3bd7.jpg",width: 5cm),
     
 )
 ]
+
+下图中，中间手机使用广播模式分享题目，两侧手机都可以接收到，左侧正在导入中，右侧已经完成导入：
+
+#image("/assets/image-14.png")
+
+由于现代手机的交通卡等功能，其标签优先级高于我的APP，尝试多种方法无法有效抢占，所以NFC碰一下功能在不具备交通卡功能的手机上表现更好：
+
+成功场景：
+#align(center)[
+#image("/assets/IMG_0035.jpeg",width: 80%)
+]
+失败时，会提示用户碰触到的是其他标签：
+#align(center)[
+#image("/assets/2183c359af5c88c18b42be11669751c6.jpg",width: 40%)
+]
+
+
 
 === StudyClaw智能助手页面
 
@@ -1185,6 +1337,9 @@ buildTypes {
     
 )
 ]
+
+#pagebreak()
+
 =	系统可能的扩展
 
 本系统在当前版本（v1.5）基础上，存在以下可扩展方向：
@@ -1225,19 +1380,25 @@ buildTypes {
 - iOS 客户端（使用 SwiftUI + CoreNFC + CoreBluetooth）。
 - Windows / Web 端（使用 Kotlin Multiplatform 或 Flutter 进行跨平台复用）。
 
+#pagebreak()
 
 =	总结体会
 
-通过这次移动互联网技术及应用课程的大作业，我独立设计并实现了一个完整的智能错题本系统。从技术选型、架构设计到代码实现，整个过程让我对移动互联网技术栈有了系统性的理解和实践。
+在这次移动互联网技术及应用课程的大作业中，我独立设计并实现了一个完整的智能错题本系统。从技术选型、架构设计到代码实现，整个过程让我对移动互联网技术栈有了系统性的理解和实践。
 
-在客户端开发方面，我深刻体会到了 Kotlin + Jetpack Compose 在 Android 开发中的生产力优势。Compose 声明式 UI 使得界面代码更加简洁和可组合。MVVM + Clean Architecture 的分层架构带来了良好的关注点分离：UI 层只关心界面展示，ViewModel 通过 StateFlow 管理状态，数据层通过 Repository 模式屏蔽了 Room、Retrofit 和 AI 调用三个异构数据源之间的差异。Room 数据库的版本迁移和索引优化也让我学习到了移动端本地存储的最佳实践。
+在客户端开发方面，我体会到了 Kotlin + Jetpack Compose 在 Android 开发中的生产力优势。Compose 声明式 UI 使得界面代码更加简洁和可组合。MVVM + Clean Architecture 的分层架构带来了良好的关注点分离：UI 层只关心界面展示，ViewModel 通过 StateFlow 管理状态，数据层通过 Repository 模式屏蔽了 Room、Retrofit 和 AI 调用三个异构数据源之间的差异。Room 数据库的版本迁移和索引优化也让我学习到了移动端本地存储的最佳实践方式。
 
-服务端虽然使用了较简单的 Flask + SQLite 方案，但双向增量同步的设计充满工程挑战：版本冲突的"最后写入胜出"策略、游标分页的正确实现、墓碑记录的定期清理等，每一个细节都直接影响用户体验的正确性和流畅性。
+服务端虽然使用了较简单的 Flask + SQLite 方案，但双向增量同步的设计具备一定的工程挑战：版本冲突的"最后写入胜出"策略、游标分页的正确实现、墓碑记录的定期清理等，每一个细节都直接影响用户体验的正确性和流畅性。
 
 NFC + BLE 的组合分享是系统技术含量最高的功能。在 NFC 模式下，HCE 卡模拟技术在 ISO 7816-4 APDU 层面实现会话身份交换，BLE GATT NOTIFY 推送 + Indication 确认机制提供了可靠的大数据通道，sessionId 的端到端校验串起了物理碰触与数据导入之间的信任链。经历了从 READ 特征值到多特征值分片再到 NOTIFY 推送的三次传输层迭代，并解决了部分手机 BLE 芯片通知静默丢失、SE 交通卡硬件路由抢占等一系列平台特有的工程问题，最终形成了一个稳定且支持双模式备选的设备间 P2P 传输方案。
+调试期间，我也学会了设置日志来观察崩溃原因和传输的过程：
+#image("/assets/ScreenShot_2026-05-22_213800_492.png")
 
-AI 集成是本系统区别于传统笔记应用的核心竞争力。阿里云 DashScope 的大模型能力通过 SSE 流式输出提供了接近 ChatGPT 的实时对话体验，而 FocusScreen 中的工具调用协议更是让 AI 从单纯的聊天机器人进化为能够直接操作本地数据库的智能助手，这种 AI Agent 的设计思路在当前业界也属于前沿方向。
+#image("/assets/ScreenShot_2026-05-22_215304_088.png")
+
+
+AI 集成是本系统区别于传统错题或笔记应用的核心竞争力。阿里云 DashScope 的大模型能力通过 SSE 流式输出提供了接近 ChatGPT 的实时对话体验，而 FocusScreen 中的工具调用协议更是让 AI 从单纯的聊天机器人进化为能够直接操作本地数据库的智能助手，这种 AI Agent 的设计思路在当前业界也属于前沿方向。
 
 在整个开发过程中，我也遇到并解决了若干具有代表性的工程问题：如何正确处理 Android 12+ BLE 权限的 `neverForLocation` 标志；如何在 Compose Navigation 中搭建嵌套导航图以支持底部导航栏和页面路由的共存；如何使用协程 + Flow 实现从 `@Streaming` Retrofit 接口到 UI 实时渲染的完整数据流管道；如何设计游标分页使得同一时间戳的数据不会被遗漏。
 
-这次大作业不仅让我掌握了具体的移动互联网开发技术，更重要的是建立了对移动应用系统设计的整体认识。从客户端分层架构到后端 RESTful API 设计，从本地数据库到云同步策略，从近场通信集成到 AI 大模型调用，这些经验将成为我未来进行更复杂的移动互联网系统开发的重要基础。
+总体来说，这次大作业不仅让我掌握了具体的移动互联网开发技术，更重要的是建立了对移动应用系统设计的整体认识。从客户端分层架构到后端 RESTful API 设计，从本地数据库到云同步策略，从近场通信集成到 AI 大模型调用，这些经验将成为我未来进行更复杂的移动互联网系统开发的重要基础。
